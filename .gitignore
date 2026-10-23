@@ -1,0 +1,15 @@
+# Target & Build
+target/
+dist/
+node_modules/
+
+# OS & Editor
+.DS_Store
+._*
+.vscode/
+.idea/
+
+# Python / Temp
+__pycache__/
+*.pyc
+.env
