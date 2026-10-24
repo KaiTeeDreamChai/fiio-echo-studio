@@ -10,9 +10,12 @@ const API_BASE =
 
 export interface BackendStatus {
   success: boolean;
+  version: string;
   db_available: boolean;
-  db_path: string;
+  db_path: string | null;
   download_dir: string;
+  ffmpeg_available: boolean;
+  ncmdump_available: boolean;
 }
 
 export interface RemotePlaylist {
@@ -44,28 +47,82 @@ export interface RemoteTrack {
   local_file_path: string;
   is_downloaded: boolean;
   pic_url?: string;
+  cover_local_path?: string;
   raw_lrc?: string;
   clean_lrc?: string;
 }
 
-export interface BuildLibraryResponse {
+export interface RemoteCover {
+  present: boolean | null;
+  count: number | null;
+  type: number | null;
+  format: string | null;
+  width: number | null;
+  height: number | null;
+  meta_width: number | null;
+  meta_height: number | null;
+  progressive: boolean | null;
+  subsampling: string | null;
+  compliant: boolean;
+  reasons: string[];
+  bytes?: number;
+}
+
+export interface InspectResult {
+  path: string;
+  container: 'flac' | 'mp3' | 'ncm' | 'unknown';
+  encrypted: boolean;
+  sample_rate: number | null;
+  bits_per_sample: number | null;
+  channels: number | null;
+  duration_sec: number | null;
+  block_size: number | null;
+  needs_reframe: boolean | null;
+  cover: RemoteCover;
+  error: string | null;
+}
+
+export interface BuildTrackResult {
+  seq: string;
+  title: string;
+  artist: string;
+  album: string;
   success: boolean;
+  skipped: boolean;
+  reason: string | null;
+  dest_audio: string | null;
+  dest_lrc: string | null;
+  filename: string | null;
+  size_bytes: number;
+  container: string | null;
+  block_size: number | null;
+  sample_rate: number | null;
+  bits_per_sample: number | null;
+  cover_compliant: boolean;
+  cover_width: number | null;
+  cover_height: number | null;
+  cover_subsampling: string | null;
+  cover_format: string | null;
+  cover_type: number | null;
+  cover_source: string | null;
+  cover_reasons: string[];
+  target_folder: string;
+}
+
+export interface BuildProgress {
+  success: boolean;
+  job_id: string;
+  status: 'running' | 'done' | 'cancelled' | 'error';
+  done: number;
+  total: number;
+  current: string;
+  results: BuildTrackResult[];
+  success_count: number;
+  failed_count: number;
+  skipped_count: number;
   library_root: string;
-  manifest_path: string;
-  processed_count: number;
-  success_count?: number;
-  failed_count?: number;
-  results: Array<{
-    seq: string;
-    title: string;
-    artist: string;
-    success: boolean;
-    dest_audio: string;
-    size_bytes: number;
-    skipped?: boolean;
-    reason?: string;
-  }>;
-  error?: string;
+  manifest_path: string | null;
+  error: string | null;
 }
 
 export const StudioApi = {
@@ -79,7 +136,10 @@ export const StudioApi = {
     return res.json();
   },
 
-  async getPlaylists(creator = '', onlyMine = false): Promise<{ count: number; playlists: RemotePlaylist[] }> {
+  async getPlaylists(
+    creator = '',
+    onlyMine = false,
+  ): Promise<{ count: number; playlists: RemotePlaylist[] }> {
     const params = new URLSearchParams();
     if (creator.trim()) {
       params.append('creator', creator.trim());
@@ -107,19 +167,51 @@ export const StudioApi = {
     return res.json();
   },
 
-  async buildLibrary(libraryRoot: string, tracks: any[]): Promise<BuildLibraryResponse> {
-    const res = await fetch(`${API_BASE}/build-library`, {
+  /** Real container / PCM / cover telemetry, measured server-side by mutagen. */
+  async inspectFiles(
+    files: string[],
+  ): Promise<{ success: boolean; count: number; items: Record<string, InspectResult> }> {
+    if (files.length === 0) {
+      return { success: true, count: 0, items: {} };
+    }
+    const res = await fetch(`${API_BASE}/inspect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        library_root: libraryRoot,
-        tracks,
-      }),
+      body: JSON.stringify({ files }),
     });
     return res.json();
   },
 
-  async dotClean(targetDir: string): Promise<{ success: boolean; message?: string; error?: string }> {
+  /** Kick off a background build job; poll {@link getBuildProgress} afterwards. */
+  async startBuild(
+    libraryRoot: string,
+    tracks: Array<Record<string, unknown>>,
+  ): Promise<{ success: boolean; job_id?: string; total?: number; library_root?: string; error?: string }> {
+    const res = await fetch(`${API_BASE}/build-library`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ library_root: libraryRoot, tracks }),
+    });
+    return res.json();
+  },
+
+  async getBuildProgress(jobId: string): Promise<BuildProgress> {
+    const res = await fetch(`${API_BASE}/build-progress?job_id=${encodeURIComponent(jobId)}`);
+    return res.json();
+  },
+
+  async cancelBuild(jobId: string): Promise<{ success: boolean }> {
+    const res = await fetch(`${API_BASE}/build-cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_id: jobId }),
+    });
+    return res.json();
+  },
+
+  async dotClean(
+    targetDir: string,
+  ): Promise<{ success: boolean; message?: string; error?: string }> {
     const res = await fetch(`${API_BASE}/dot-clean`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -128,7 +220,9 @@ export const StudioApi = {
     return res.json();
   },
 
-  async fatSort(targetDir: string): Promise<{ success: boolean; message?: string; error?: string }> {
+  async fatSort(
+    targetDir: string,
+  ): Promise<{ success: boolean; message?: string; error?: string }> {
     const res = await fetch(`${API_BASE}/fat-sort`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

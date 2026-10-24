@@ -7,39 +7,48 @@ This document is the authoritative technical reference for AI Agents taking over
 ## 1. Project Identity & Overview
 
 - **Project Name**: FiiO Echo Studio
-- **Repository Root**: `/Users/qzchai/.gemini/antigravity/scratch/NetEase2Mp3Player/fiio-echo-studio`
 - **Remote GitHub**: `https://github.com/KaiTeeDreamChai/fiio-echo-studio` (`main` branch)
 - **License**: WTFPL (`LICENSE`)
-- **Target Hardware**: SNOWSKY / FiiO Echo Mini & portable lossless DAPs with embedded hardware decoders and FAT32 microSD storage.
-- **Design System**: **Swiss International Typographic Style** (Asymmetric 3-column grid, high-contrast monochrome `#000000` / `#FFFFFF` / `#F4F4F0` + `#FF3300` International Orange/Red accent, tabular monospace telemetry, full Light/Dark mode support).
+- **Target Hardware**: SNOWSKY / FiiO Echo Mini & portable lossless DAPs with embedded decoders and FAT32 microSD storage.
+- **Design System**: **Swiss International Typographic Style** (asymmetric 3-column grid, `#000000` / `#FFFFFF` / `#F4F4F0` + `#FF3300` accent, tabular monospace telemetry, full Light/Dark mode).
+- **Version**: `1.1.0` (API `1.1.0`, manifest schema `1.1.0`)
 
 ---
 
-## 2. The 5 Hardware Compliance Rules (Domain Invariants)
+## 2. The Hardware Compliance Rules (Domain Invariants)
 
-Portable embedded DAPs suffer from strict hardware decoder and filesystem limitations. All audio processing in `engine/core/` enforces these 5 rules:
+### 2.1 FLAC frame BlockSize ≤ 4096 — `engine/core/flac_reframer.py`
+Embedded decoders allocate a 4 KB DMA buffer; `max_blocksize > 4096` (NetEase uses 8192) causes pops / skips / freezes.
+`FlacReframer.reframe_audio_stream()` runs `ffmpeg -vn -c:a flac -frame_size 4096` and **verifies the output** with mutagen. PCM stays bit-exact.
 
-1. **FLAC Frame BlockSize ≤ 4096** (`engine/core/flac_reframer.py`)
-   - **Why**: Embedded rockchip/ingenic/RTOS decoders allocate a 4KB DMA frame buffer. FLAC files encoded with `BlockSize > 4096` (e.g., 8192 or 16384) cause loud audio pops, track skipping, or hard freezes.
-   - **Rule**: Parse the 34-byte `STREAMINFO` header (`max_blocksize`). If `> 4096`, re-encode losslessly via `ffmpeg -c:a flac -compression_level 5` (which caps blocksize at 4096) while preserving 100% bit-exact PCM (16/24-bit, up to 192kHz).
+### 2.2 Embedded cover: 500×500 baseline JPEG, YUV 4:2:0, Type 3 — `engine/core/cover_normalizer.py`
+NetEase `.ncm` payloads often carry a picture block whose **FLAC metadata says 0×0** even though the bytes are e.g. 1115×1115 `yuvj444p`. Compliance is therefore decided by `engine/core/inspector.py`, which parses the real JPEG/PNG bytes (SOF markers) — never by the metadata alone.
 
-2. **Embedded Cover Art: 500×500 Baseline JPEG, YUV 4:2:0** (`engine/core/cover_normalizer.py`)
-   - **Why**: Progressive JPEGs, PNGs, >1000px images, or `YUV 4:4:4` (`yuvj444p`) chroma subsampling fail to render or crash the player's UI thread.
-   - **Rule**: Convert cover art to `500×500` Baseline JPEG with `YUV 4:2:0` (`-vf scale=500:500 -pix_fmt yuvj420p`), strip all secondary `METADATA_BLOCK_PICTURE` blocks, and embed a single `Type 3 (Cover Front)` block.
+Pipeline cover strategy:
+1. embedded picture non-compliant → normalize bytes with ffmpeg (`scale` + `pad` + `-pix_fmt yuvj420p`), re-embed as the only Type 3 picture;
+2. embedded picture already compliant → keep (re-attach after a reframe, because `ffmpeg -vn` drops picture blocks);
+3. **no embedded picture → use NetEase's local art store** `<download_dir>/meta/track-<id>.jpg` (`cover_local_path`, full-res, offline, 457/457 tracks on the test library);
+4. **local cache missing → download from the NetEase `picUrl` (`cover_url`)**; network failure never fails the track.
 
-3. **Companion `.lrc` Lyrics Sanitization** (`engine/core/lrc_sanitizer.py`)
-   - **Why**: NetEase Cloud Music injects JSON metadata lines (`{"t":0,"c":[...]}`) and 3-digit milliseconds `[mm:ss.xxx]` which break hardware lyric parsers.
-   - **Rule**: Output a companion `.lrc` file with the **exact same filename stem** as the audio file, convert JSON headers to clean text, normalize timestamps to 2-digit centiseconds `[mm:ss.xx]`, and encode as `UTF-8` with `CRLF` (`\r\n`) line endings.
+MP3 files get the same treatment through ID3 `APIC` frames (`_write_mp3_cover` writes exactly one Type 3 APIC). The `report.cover_source` field records `embedded` / `local_meta` / `downloaded`.
 
-4. **NCM Lossless Decryption** (`engine/core/ncm_decryptor.py`)
-   - **Why**: NetEase VIP downloads are encrypted `.ncm` containers.
-   - **Rule**: Decrypt via bundled `ncmdump` into native `.flac` or `.mp3`, preserving original Vorbis/ID3 metadata before feeding into the FLAC/Cover/LRC normalization pipeline.
+### 2.3 Companion LRC — `engine/core/lrc_sanitizer.py`
+Strips NetEase JSON lines (`{"t":1234,"c":[...]}`), normalizes timestamps to `[mm:ss.xx]`, NFC-normalizes text, writes **UTF-8 without BOM** + CRLF by default. Set `FIIO_LRC_BOM=1` for players that require a BOM. Reads UTF-8/UTF-16/GB18030/Big5 input.
 
-5. **FAT32 Physical Directory Slot Sorting & Ghost File Purge** (`engine/core/pipeline.py`)
-   - **Why**: Embedded DAPs often iterate files in raw FAT32 directory table entry order rather than sorting alphabetically, and display macOS AppleDouble (`._*`) files as broken tracks.
-   - **Rule**:
-     - `fat_sort_directory()`: Moves files into a temporary directory and moves them back sequentially in strict `01..N` alphabetical order so FAT32 allocates contiguous directory slots.
-     - `dot_clean_directory()`: Executes `/usr/sbin/dot_clean -m` and removes `.DS_Store`, `._*`, `.Spotlight-V100`, `.Trashes`, and `.fseventsd`.
+### 2.4 NCM decryption — `engine/core/ncm_decryptor.py`
+Wraps the bundled `ncmdump`. **The output container decides the extension**: `PipelineOrchestrator._detect_container()` sniffs `.flac` vs `.mp3` (or magic bytes) and writes `dest_stem + ".flac"` / `".mp3"`. An MP3 is never renamed to `.flac` (a regression that broke playback in ≤1.0.0).
+
+### 2.5 FAT32 ordering & ghost files — `engine/core/pipeline.py`
+- `fat_sort_directory()`: moves each directory's files to a staging bucket inside the card and moves them back in sorted order to rebuild directory entries. **Best-effort**: the FS driver owns final ordering.
+- `dot_clean_directory()`: deletes `._*`, `.DS_Store`, `.Spotlight-V100`, `.Trashes`, `.fseventsd`, then runs `/usr/sbin/dot_clean -m`.
+
+### 2.6 FAT32-safe naming — `engine/core/naming.py`
+Every destination path goes through `sanitize_filename()` / `sanitize_relative_dir()` / `build_dest_stem()`:
+- `\ / : * ? " < > |` → full-width equivalents, control chars stripped, trailing dots/spaces removed;
+- `..` and absolute segments dropped (no path traversal);
+- UTF-8-aware truncation (default 180 bytes for the stem);
+- DOS device names (`CON`, `PRN`, …) prefixed with `_`;
+- collisions get ` (2)`, ` (3)` via `make_unique`/builder bookkeeping.
 
 ---
 
@@ -47,134 +56,162 @@ Portable embedded DAPs suffer from strict hardware decoder and filesystem limita
 
 ```text
 fiio-echo-studio/
-├── app_launcher.py                 # Native macOS app entrypoint (starts HTTP server + pywebview Cocoa window)
-├── build_app.sh                    # One-click macOS .app & .dmg packaging script
+├── app_launcher.py                 # Native macOS entrypoint (HTTP server thread + pywebview Cocoa window)
+├── build_app.sh                    # One-click .app & .dmg packaging (provisions engine/bin first)
 ├── FiiO_Echo_Studio.spec           # PyInstaller bundle specification
-├── assets/
-│   └── icon.icns                   # macOS app icon (Swiss red/black style)
-├── docs/
-│   └── FIIO_ECHO_AUDIO_SPECIFICATION.md  # Detailed hardware decoding & FAT32 specification
-├── engine/                         # Python Backend & Core Audio Engine
-│   ├── server.py                   # HTTP JSON API Server (127.0.0.1:19880)
-│   ├── bridge.py                   # CLI interface for headless/agent invocation
-│   ├── bin/                        # Static bundled binaries (git-ignored: ffmpeg, ncmdump)
-│   ├── providers/
-│   │   └── netease_db.py           # Read-only SQLite parser for NetEase macOS client DB
+├── assets/screenshots/             # README screenshots
+├── docs/FIIO_ECHO_AUDIO_SPECIFICATION.md
+├── engine/
+│   ├── server.py                   # Threaded HTTP API + background build jobs + Host/Origin guard
+│   ├── bridge.py                   # CLI: playlists/albums/tracks/inspect/build-library (JSON on stdout)
+│   ├── bin/                        # git-ignored static binaries (ffmpeg, ncmdump)
+│   ├── providers/netease_db.py     # Read-only SQLite reader (mode=ro) + local meta cover index
 │   ├── core/
-│   │   ├── bin_resolver.py         # Locates ffmpeg & ncmdump (PyInstaller _MEIPASS -> engine/bin -> PATH)
-│   │   ├── ncm_decryptor.py        # .ncm decryption wrapper
-│   │   ├── flac_reframer.py        # STREAMINFO inspector & BlockSize <= 4096 reframer
-│   │   ├── cover_normalizer.py     # 500x500 YUV420p Baseline JPEG normalizer
-│   │   ├── lrc_sanitizer.py        # NetEase JSON lyric cleaner & UTF-8 CRLF writer
-│   │   └── pipeline.py             # End-to-end track processor, FAT32 slot sorter, dot_clean runner
-│   └── tests/
-│       └── test_core.py            # Unit tests for FLAC, LRC, and pipeline logic
-└── src/                            # React 19 + TypeScript + Tailwind CSS Frontend
-    ├── App.tsx                     # Root state, NetEase DB loading, track normalization & build handlers
-    ├── index.css                   # Swiss design tokens (:root & .dark), badges, custom scrollbars
-    ├── services/
-    │   └── api.ts                  # Typed fetch wrapper for 127.0.0.1:19880/api/*
-    ├── types/
-    │   └── library.ts              # TrackItem, FilterType, ClassifyMode interfaces
-    ├── hooks/
-    │   └── useAdaptiveLayout.ts    # 3-Tier responsive layout hook (Desktop 3-col / Split 2-col / Mobile 1-col)
+│   │   ├── bin_resolver.py         # _MEIPASS → engine/bin → PATH → Homebrew
+│   │   ├── inspector.py            # Real container/PCM/cover telemetry (no audio decode)
+│   │   ├── naming.py               # FAT32-safe filename/path helpers
+│   │   ├── ncm_decryptor.py        # .ncm → .flac/.mp3
+│   │   ├── flac_reframer.py        # STREAMINFO check + ≤4096 reframe
+│   │   ├── cover_normalizer.py     # 500×500 YUV420p baseline JPEG, picUrl download
+│   │   ├── lrc_sanitizer.py        # JSON/3-digit-ms cleanup, UTF-8(+optional BOM) CRLF
+│   │   ├── pipeline.py             # Per-track pipeline + FAT32 sort + dot_clean + manifest
+│   │   └── builder.py              # Shared library builder (server + CLI)
+│   └── tests/test_core.py          # 17 unit tests (skips media fixtures without ffmpeg)
+└── src/
+    ├── App.tsx                     # Root state: real inspection, job polling, single-track build
+    ├── services/api.ts             # Typed fetch wrapper (/inspect, /build-library, /build-progress)
+    ├── types/library.ts            # TrackItem (nullable real values), manifest schema v1.1
+    ├── hooks/useAdaptiveLayout.ts  # 3-tier layout (desktop / split / mobile)
     └── components/
-        ├── SwissHeader.tsx         # Top bar: Theme toggle, Library Root input, native BROWSE button
-        ├── QueuePanel.tsx          # COL 01: NetEase DB Album/Playlist browser, creator filter, track table
-        ├── InspectorPanel.tsx      # COL 02: Real-time hardware spec telemetry & LRC diff viewer
-        ├── LocalLibraryPanel.tsx   # COL 03: Target folder tree, FAT32/dot_clean tools, split Build buttons
-        └── TelemetryFooter.tsx     # Bottom bar: Live log output & {okCount}/{totalCount} OK badge
+        ├── SwissHeader.tsx         # Theme, library root input (aria-label), BROWSE
+        ├── QueuePanel.tsx          # COL 01: album/playlist browser, real BLOCK/COVER columns
+        ├── InspectorPanel.tsx      # COL 02: telemetry, cover reasons, LRC diff
+        ├── LocalLibraryPanel.tsx   # COL 03: metrics, tree, FAT32 tools, build + progress/cancel
+        └── TelemetryFooter.tsx     # Live log + {ok}/{total} OK
 ```
 
 ---
 
-## 4. Critical UI & Business Logic Invariants (Do Not Regress!)
+## 4. Critical Invariants (Do Not Regress!)
 
-When modifying the frontend or backend, **strictly preserve** the following behaviors requested by the user:
-
-1. **Zero Demo / Mock Data**:
-   - Do not reintroduce hardcoded mock tracks (`src/data/mockTracks.ts` was intentionally deleted). All tracks come live from the NetEase SQLite DB via `/api/albums` and `/api/playlists`.
-
-2. **Generic Creator Filtering (No Hardcoded Username)**:
-   - `preferredCreator` defaults to `""` (empty string) and `onlyMine` defaults to `false` across `App.tsx`, `api.ts`, `server.py`, and `bridge.py`.
-   - By default, all playlists in the local NetEase database are listed.
-   - In `QueuePanel.tsx`, the input placeholder is `"作者昵称 (可选)"`. When `preferredCreator.trim()` is empty, the `"仅看 TA 的歌单"` checkbox is disabled and dimmed (`opacity-40`).
-
-3. **Accurate Downloaded vs. Undownloaded Track Status (`X / Y OK`)**:
-   - Playlists/albums in NetEase often contain tracks that are not downloaded locally (`is_downloaded: false`, `local_file_path: ""`).
-   - Undownloaded tracks must have `status: 'NOT_DOWNLOADED'` (rendered as `[未下载]`).
-   - When executing `buildLibrary`, **only** tracks with `isDownloaded && localFilePath` are sent to the backend pipeline and marked `COMPLIANT` upon success.
-   - The footer and summary must report `okCount / tracks.length OK` (e.g., `30 / 1640 OK`), never falsely marking undownloaded tracks as OK.
-
-4. **Split Action Buttons in `LocalLibraryPanel.tsx` (`COL 03`)**:
-   - The bottom build action is split into two side-by-side buttons in a 12-column grid:
-     - **Left (`col-span-4`)**: Red background (`bg-[#FF3300] text-white`), label `"执行"` (or `"执行中..."` when building).
-     - **Right (`col-span-8`)**: Matches panel background (`bg-[var(--background)] text-[var(--foreground)]`), label `"BUILD LOCAL LIBRARY"`.
-   - Both buttons trigger `onBuildLibrary`.
-
-5. **Native macOS Folder Picker (`BROWSE` Button)**:
-   - Handled by `GET /api/pick-folder` in `engine/server.py`.
-   - Uses `osascript` with `tell application "System Events" to activate` before `choose folder` so the native Finder dialog always appears in the foreground.
-
-6. **Strict Dark Mode Compliance**:
-   - Never use hardcoded Tailwind `bg-white`, `bg-black`, `text-black`, or `border-black` on structural containers, tabs, selects, or badges.
-   - Always use CSS variables defined in `src/index.css`: `bg-[var(--background)]`, `bg-[var(--card)]`, `bg-[var(--sidebar)]`, `text-[var(--foreground)]`, `border-[var(--border)]`, `bg-[var(--active-bg)]`, `text-[var(--active-fg)]`.
+1. **Zero invented telemetry.** `blockSize`, `pcm`, `coverRes`, `coverYuv`, `coverType` come from `AudioInspector`. Unknown ⇒ `null` / `—`. Never hardcode 8192 / 1400×1400 / 24bit-96kHz (this was the 1.0.0 bug).
+2. **Zero mock data.** No hardcoded sample albums/playlists/tracks (`Blonde`, `Hurry Up Tomorrow` etc. must not appear in source).
+3. **Honest counts.** `COMPLIANT` only after a real inspection/build proves it. `NOT_DOWNLOADED` for cloud-only tracks. Never mark a track compliant from a UI-only state change.
+4. **Real container extensions.** MP3 stays `.mp3`; FLAC `.flac`. `process_track()` takes an extension-less `dest_stem`.
+5. **No-op success is forbidden.** A mutating endpoint must either do the work or report failure; `fat-sort` used to only count files.
+6. **Destructive operations stay inside `library_root`.** `sanitize_relative_dir()` strips `..`/absolute paths; `_serve_static()` refuses paths outside `dist/`.
+7. **API access is origin-checked.** Only `127.0.0.1` / `localhost` `Host`+`Origin` are accepted; do not widen to `*`.
+8. **Split action buttons in COL 03** (`执行` red + `BUILD LOCAL LIBRARY`) are a user request — preserve them. A cancel button and progress bar now sit above them while a job runs.
+9. **Native folder picker** uses `osascript` with `System Events to activate`.
+10. **Dark mode**: never hardcode Tailwind `bg-white` / `text-black` on structural containers; use `var(--*)` tokens from `src/index.css`.
 
 ---
 
-## 5. Development, Testing & Packaging Workflows
+## 5. HTTP API (`engine/server.py`, default `127.0.0.1:57123`)
 
-### A. Local Development (Web UI + Python API)
-If the user wants to preview or debug in a browser:
-```bash
-# Terminal 1: Start Python HTTP Engine on 127.0.0.1:19880
-python3 -m engine.server --port 19880
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/api/status` | DB path, download dir, ffmpeg/ncmdump availability, version |
+| GET | `/api/albums` · `/api/playlists` · `/api/album-tracks` · `/api/playlist-tracks` | NetEase DB reads (tracks include `pic_url` + sanitized LRC) |
+| GET | `/api/inspect?file=` | Single-file real telemetry |
+| POST | `/api/inspect` | `{files: []}` → `{items: {path: info}}` (thread pool 8, LRU cache by mtime+size) |
+| POST | `/api/build-library` | `{library_root, tracks}` → `{job_id}` (starts background job) |
+| GET | `/api/build-progress?job_id=` | Live snapshot: `status/done/total/current/results/*_count/manifest_path` |
+| POST | `/api/build-cancel` | `{job_id}` → graceful stop after the current track |
+| POST | `/api/fat-sort` · `/api/dot-clean` | Real TF-card maintenance, returns counts |
+| GET | `/api/pick-folder` | Native macOS folder dialog |
 
-# Terminal 2: Start Vite Dev Server on http://localhost:5173
-npm run dev
+Job lifecycle: `running → done | cancelled | error`. Jobs are kept in memory (last 20). `POST /api/build-library` returns immediately; the frontend polls every 500 ms.
+
+Inspection payload (per file):
+
+```json
+{
+  "container": "flac|mp3|ncm|unknown", "encrypted": false,
+  "sample_rate": 96000, "bits_per_sample": 24, "channels": 2,
+  "duration_sec": 215.4, "block_size": 8192, "needs_reframe": true,
+  "cover": {"present": true, "count": 1, "type": 3, "format": "jpeg",
+            "width": 1115, "height": 1115, "meta_width": 0, "meta_height": 0,
+            "subsampling": "4:4:4", "progressive": false,
+            "compliant": false, "reasons": ["SIZE", "CHROMA", "METADATA_ZERO_OR_MISMATCH"]},
+  "error": null
+}
 ```
-*(Remember to stop background dev servers when finished so ports `19880` and `5173` are not left hanging.)*
 
-### B. Running Backend Unit Tests
+---
+
+## 6. Development, Testing & Packaging
+
+### A. Local development
 ```bash
-python3 -m unittest discover -s engine/tests
+python3 -m engine.server --port 57123     # threaded API
+npm run dev                                # Vite on :5173 (dev mode talks to :57123)
 ```
+Stop both servers when finished. `npm run build` runs `tsc -b && vite build` (strict TS, `noUnusedLocals`).
 
-### C. Building Standalone macOS `.app` and `.dmg` (Scheme A)
-The project packages into a 100% standalone macOS application using `pywebview` (Cocoa `WKWebView`) + `PyInstaller` + embedded static `ffmpeg` and `ncmdump`.
-
-**Prerequisites before running `./build_app.sh`**:
-- Ensure `engine/bin/ffmpeg` (static binary) and `engine/bin/ncmdump` exist and have `chmod +x` permissions (they are git-ignored to avoid bloating the repo).
-- `build_app.sh` automatically sets `export DEVELOPER_DIR="/Library/Developer/CommandLineTools"` to avoid Xcode license agreement errors (Error 69) during `lipo` / `codesign`.
-
+### B. Tests
 ```bash
-# Run full build pipeline (Vite build -> PyInstaller .app -> xattr clean -> hdiutil .dmg)
+python3 -m unittest discover -s engine/tests -v      # 17 tests
+```
+Media fixtures are generated with `ffmpeg`; tests skip automatically when ffmpeg is absent.
+
+### C. CLI bridge (same code path as the app)
+```bash
+python3 -m engine.bridge get-playlists [--creator NAME] [--only-mine]
+python3 -m engine.bridge get-albums
+python3 -m engine.bridge get-playlist-tracks --pid <ID>
+python3 -m engine.bridge get-album-tracks --name "<ALBUM>"
+python3 -m engine.bridge inspect --file "/path/to/track.flac"
+python3 -m engine.bridge build-library --config build.json [--library-root DIR] [--quiet]
+```
+`build.json` = `{"library_root": "...", "tracks": [{"src_path","target_folder","seq","title","artist","album","cover_url"}]}`.
+
+### D. Packaging
+```bash
 ./build_app.sh
 ```
-**Build Outputs** (in `dist_app/`, git-ignored):
-- `dist_app/FiiO Echo Studio.app` (~78 MB standalone bundle)
-- `dist_app/FiiO_Echo_Studio_v1.0.0_arm64.dmg` (~37 MB compressed installer with `/Applications` symlink)
+Provisions `engine/bin/{ffmpeg,ncmdump}` from `node_modules/ffmpeg-static` / `PATH` / Homebrew when missing, builds the frontend, packages with PyInstaller, then creates the DMG. Outputs in `dist_app/` (git-ignored).
 
 ---
 
-## 6. Headless CLI Bridge (`engine/bridge.py`)
+## 7. Data Model
 
-Agents can also invoke the backend engine directly via CLI (outputs pure JSON):
+`echo_library.json` (schema `1.1.0`) is written to the library root:
 
-```bash
-# 1. List all playlists in NetEase DB
-python3 -m engine.bridge get-playlists
-
-# 2. List playlists filtered by creator
-python3 -m engine.bridge get-playlists --creator "SomeUser" --only-mine
-
-# 3. List all downloaded albums
-python3 -m engine.bridge get-albums
-
-# 4. Get tracks for a specific playlist ID or album name
-python3 -m engine.bridge get-playlist-tracks --pid "<PLAYLIST_ID>"
-python3 -m engine.bridge get-album-tracks --name "<ALBUM_NAME>"
-
-# 5. Inspect a single audio file's hardware compliance
-python3 -m engine.bridge inspect --file "/path/to/track.flac"
+```json
+{
+  "schema_version": "1.1.0",
+  "library_root": "/path/to/library",
+  "target_profile": "SNOWSKY_FIIO_ECHO",
+  "updated_at": "2026-10-24T20:30:00",
+  "total_tracks": 2,
+  "collections": [{
+    "id": "albums_hurry_up_tomorrow", "type": "album",
+    "name": "Hurry Up Tomorrow", "directory": "Albums/Hurry Up Tomorrow",
+    "tracks": [{
+      "seq": "01", "filename": "01 The Weeknd - São Paulo.flac",
+      "lrc_filename": "01 The Weeknd - São Paulo.lrc",
+      "container": "flac", "size_bytes": 76881226,
+      "block_size": 4096, "sample_rate": 96000, "bits_per_sample": 24,
+      "cover": {"compliant": true, "width": 500, "height": 500,
+                "subsampling": "4:2:0", "format": "jpeg", "type": 3,
+                "source": "local_meta"},
+      "compliant": true
+    }]
+  }]
+}
 ```
+
+---
+
+## 8. Troubleshooting
+
+| Symptom | Cause / Fix |
+|---|---|
+| `UNSUPPORTED_CONTAINER` | Only FLAC/MP3 are normalized; decrypt/extract others first |
+| Cover stays "无封面" | No embedded art, no `meta/track-<id>.jpg`, and no reachable `picUrl`; inspect `report.cover_error` |
+| `ffmpeg` not found | `brew install ffmpeg` or place the binary at `engine/bin/ffmpeg` |
+| `ncmdump` not found | `brew install ncmdump` or `engine/bin/ncmdump` |
+| Browser shows 403 `ORIGIN_NOT_ALLOWED` | Access via `http://localhost:5173` or `http://127.0.0.1:57123`, not an arbitrary host |
+| Build stuck at `running` | Check `/api/build-progress`; a huge `.ncm` decode can take a while. Cancel via `/api/build-cancel` |
+| FAT32 order still wrong | Driver-dependent; re-copy the folder after `fat-sort` |

@@ -46,7 +46,7 @@ export const SwissHeader: React.FC<SwissHeaderProps> = ({
             <h1 className="font-bold tracking-tight text-sm uppercase truncate">SNOWSKY / FIIO ECHO STUDIO</h1>
           </div>
           <p className="text-xs text-[var(--muted-foreground)] swiss-mono truncate">
-            LOCAL LIBRARY NORMALIZER // v0.3 WORKBENCH
+            LOCAL LIBRARY NORMALIZER // v1.1.0 WORKBENCH
           </p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0 ml-2">
@@ -90,6 +90,7 @@ export const SwissHeader: React.FC<SwissHeaderProps> = ({
           <div className="flex items-center gap-1 mt-0.5">
             <input
               type="text"
+              aria-label="Local Library Root"
               value={libraryRoot}
               onChange={(e) => onLibraryRootChange(e.target.value)}
               className="bg-[var(--background)] border border-[var(--border)] px-1.5 py-0.5 text-xs swiss-mono w-full truncate focus:outline-none"

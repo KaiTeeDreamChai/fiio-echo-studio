@@ -4,6 +4,9 @@ import type { TrackItem } from '../types/library';
 interface LocalLibraryPanelProps {
   tracks: TrackItem[];
   isBuilding: boolean;
+  buildProgress?: { done: number; total: number };
+  canCancel?: boolean;
+  onCancelBuild?: () => void;
   onBuildLibrary: () => void;
   onFatSort: () => void;
   onDotClean: () => void;
@@ -12,6 +15,9 @@ interface LocalLibraryPanelProps {
 export const LocalLibraryPanel: React.FC<LocalLibraryPanelProps> = ({
   tracks,
   isBuilding,
+  buildProgress,
+  canCancel = false,
+  onCancelBuild,
   onBuildLibrary,
   onFatSort,
   onDotClean,
@@ -113,12 +119,13 @@ export const LocalLibraryPanel: React.FC<LocalLibraryPanelProps> = ({
                     <div className="pl-4 text-[var(--muted-foreground)] text-xs space-y-0.5 mt-0.5">
                       {trks.slice(0, 2).map((tk) => (
                         <div key={tk.id} className="truncate">
-                          ├── 🎵 {tk.seq} {tk.artist} - {tk.title}.flac
+                          ├── 🎵 {tk.seq} {tk.artist} - {tk.title}
+                          {tk.container === 'mp3' ? '.mp3' : '.flac'}
                         </div>
                       ))}
                       {trks.length > 2 && (
                         <div className="text-[var(--muted-foreground)] italic">
-                          └── ... and {trks.length - 2} more (.flac + .lrc)
+                          └── ... and {trks.length - 2} more (.flac/.mp3 + .lrc)
                         </div>
                       )}
                     </div>
@@ -155,7 +162,30 @@ export const LocalLibraryPanel: React.FC<LocalLibraryPanelProps> = ({
       </div>
 
       {/* Master Build Action Buttons */}
-      <div className="p-3 swiss-border-t bg-[var(--sidebar)] shrink-0 flex items-center gap-2">
+      <div className="p-3 swiss-border-t bg-[var(--sidebar)] shrink-0 flex flex-col gap-2">
+        {isBuilding && buildProgress && buildProgress.total > 0 && (
+          <div className="flex items-center gap-2">
+            <div className="h-1 flex-1 bg-[var(--border)] overflow-hidden">
+              <div
+                className="h-full bg-[#FF3300] transition-all duration-300"
+                style={{
+                  width: `${Math.min(100, Math.round((buildProgress.done / buildProgress.total) * 100))}%`,
+                }}
+              />
+            </div>
+            <span className="swiss-mono text-xs text-[var(--muted-foreground)] shrink-0">
+              {buildProgress.done}/{buildProgress.total}
+            </span>
+            <button
+              onClick={onCancelBuild}
+              disabled={!canCancel}
+              className="swiss-mono text-xs px-2 py-0.5 border border-[var(--border)] bg-[var(--card)] font-bold cursor-pointer hover:border-[#FF3300] disabled:opacity-40"
+            >
+              取消
+            </button>
+          </div>
+        )}
+        <div className="flex items-center gap-2">
         <button
           onClick={onBuildLibrary}
           disabled={isBuilding}
@@ -178,10 +208,15 @@ export const LocalLibraryPanel: React.FC<LocalLibraryPanelProps> = ({
           title="构建本地乐库 (FiiO Echo 本地化目录与清单)"
         >
           <span className="truncate">
-            {isBuilding ? 'BUILDING LOCAL LIBRARY...' : allCompliant ? '✓ REBUILD LOCAL LIBRARY' : 'BUILD LOCAL LIBRARY'}
+            {isBuilding
+              ? `BUILDING ${buildProgress?.done ?? 0}/${buildProgress?.total ?? 0}...`
+              : allCompliant
+                ? '✓ REBUILD LOCAL LIBRARY'
+                : 'BUILD LOCAL LIBRARY'}
           </span>
           <span className="shrink-0 ml-1 font-bold">→</span>
         </button>
+        </div>
       </div>
     </section>
   );

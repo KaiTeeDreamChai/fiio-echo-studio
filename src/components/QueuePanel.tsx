@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { TrackItem, ClassifyMode, FilterType } from '../types/library';
 import type { RemoteAlbum, RemotePlaylist } from '../services/api';
 
@@ -58,11 +58,24 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
   onMoveDown,
 }) => {
   const [dbSourceType, setDbSourceType] = useState<'album' | 'playlist'>('album');
-  const [selectedAlbum, setSelectedAlbum] = useState<string>('Blonde');
+  const [selectedAlbum, setSelectedAlbum] = useState<string>('');
   const [selectedPlaylist, setSelectedPlaylist] = useState<string>('');
-  const [manualDest, setManualDest] = useState<string>('Albums/Blonde');
+  const [manualDest, setManualDest] = useState<string>('');
   const [isCreatingFolder, setIsCreatingFolder] = useState<boolean>(false);
   const [newFolderName, setNewFolderName] = useState<string>('');
+
+  // Keep the pickers aligned with live data instead of hardcoded sample values.
+  useEffect(() => {
+    if (!selectedAlbum || !availableAlbums.some((album) => album.name === selectedAlbum)) {
+      setSelectedAlbum(availableAlbums[0]?.name ?? '');
+    }
+  }, [availableAlbums, selectedAlbum]);
+
+  useEffect(() => {
+    if (!manualDest || !customFolders.includes(manualDest)) {
+      setManualDest(customFolders[0] ?? '');
+    }
+  }, [customFolders, manualDest]);
 
   const filteredTracks = tracks.filter((t) => {
     if (activeFilter === 'issues') return t.status === 'NEEDS_FIX';
@@ -208,8 +221,9 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                     ))}
                   </select>
                   <button
-                    onClick={() => onApplyDbAlbum(selectedAlbum)}
-                    className="col-span-3 text-xs swiss-mono px-2 py-1 bg-[#FF3300] hover:bg-[#e02d00] text-white font-bold cursor-pointer truncate"
+                    onClick={() => selectedAlbum && onApplyDbAlbum(selectedAlbum)}
+                    disabled={!selectedAlbum}
+                    className="col-span-3 text-xs swiss-mono px-2 py-1 bg-[#FF3300] hover:bg-[#e02d00] disabled:opacity-40 text-white font-bold cursor-pointer truncate"
                   >
                     导入此专辑 →
                   </button>
@@ -441,6 +455,13 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                   <td className="py-2 px-2 col-secondary">
                     {t.status === 'NOT_DOWNLOADED' ? (
                       <span className="text-[var(--muted-foreground)]">--</span>
+                    ) : t.blockSize === null ? (
+                      <span
+                        className="text-[var(--muted-foreground)]"
+                        title={t.encrypted ? '加密 .ncm：构建时解密后再复核真实帧大小' : '无法读取帧大小'}
+                      >
+                        {t.encrypted ? '待解密' : '—'}
+                      </span>
                     ) : t.blockSize > 4096 ? (
                       <span className="text-[#FF3300] font-bold">{t.blockSize}!</span>
                     ) : (
@@ -450,17 +471,31 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                   <td className="py-2 px-2 col-secondary">
                     {t.status === 'NOT_DOWNLOADED' ? (
                       <span className="text-[var(--muted-foreground)]">--</span>
-                    ) : t.coverRes !== '500×500' || t.coverYuv !== '4:2:0' ? (
-                      <span className="text-[#FF3300] font-bold">{t.coverRes.split('×')[0]}p</span>
-                    ) : (
+                    ) : t.coverCompliant ? (
                       <span className="text-emerald-600">500p</span>
+                    ) : t.coverRes === '无封面' ? (
+                      <span
+                        className="text-[#FF3300] font-bold"
+                        title={t.encrypted ? '加密 .ncm：构建时解密后补封面' : '无内嵌封面'}
+                      >
+                        缺失
+                      </span>
+                    ) : (
+                      <span
+                        className="text-[#FF3300] font-bold"
+                        title={t.coverReasons.join(' / ') || undefined}
+                      >
+                        {t.coverRes === '—' ? '—' : `${t.coverRes.split('×')[0]}p`}
+                      </span>
                     )}
                   </td>
                   <td className="py-2 px-3 text-right">
                     {t.status === 'COMPLIANT' ? (
                       <span className="px-1.5 py-0.5 bg-emerald-600 text-white font-bold">OK</span>
                     ) : t.status === 'NEEDS_FIX' ? (
-                      <span className="px-1.5 py-0.5 bg-[#FF3300] text-white font-bold">FIX</span>
+                      <span className="px-1.5 py-0.5 bg-[#FF3300] text-white font-bold">
+                        {t.encrypted ? '构建' : 'FIX'}
+                      </span>
                     ) : (
                       <span className="px-1.5 py-0.5 bg-[var(--muted)] text-[var(--muted-foreground)] border border-[var(--border)] font-bold text-xs">
                         未下载
@@ -477,7 +512,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
       {/* Column Footer */}
       <div className="px-3.5 py-2.5 swiss-border-t bg-[var(--sidebar)] flex items-center justify-between text-xs swiss-mono shrink-0">
         <span className="truncate">
-          NAMING: <strong className="font-semibold">{'{01..N}'} {'{Artist}'} - {'{Title}'}.flac</strong>
+          NAMING: <strong className="font-semibold">{'{01..N}'} {'{Artist}'} - {'{Title}'}.flac / .mp3</strong>
         </span>
         <span
           className={`px-2 py-0.5 text-white font-bold shrink-0 ${

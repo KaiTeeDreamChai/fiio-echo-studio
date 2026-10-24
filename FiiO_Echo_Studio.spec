@@ -87,8 +87,8 @@ app = BUNDLE(
     icon=os.path.join(project_root, 'assets', 'icon.icns'),
     bundle_identifier='com.fiio.echostudio',
     info_plist={
-        'CFBundleShortVersionString': '1.0.0',
-        'CFBundleVersion': '1.0.0',
+        'CFBundleShortVersionString': '1.1.0',
+        'CFBundleVersion': '1.1.0',
         'CFBundleDisplayName': 'FiiO Echo Studio',
         'NSHighResolutionCapable': 'True',
         'LSMinimumSystemVersion': '11.0',

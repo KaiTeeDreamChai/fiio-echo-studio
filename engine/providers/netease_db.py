@@ -5,8 +5,11 @@ Supports reading NetEase Cloud Music SQLite databases (Modern 3.x & Legacy).
 Safely opens in read-only mode (mode=ro) to prevent database locking or corruption.
 """
 
+import glob
+import hashlib
 import os
 import json
+import re
 import sqlite3
 import unicodedata
 from typing import List, Dict, Any, Optional
@@ -43,6 +46,43 @@ class NetEaseDBProvider:
             raise FileNotFoundError("NetEase database not found.")
         uri = f"file:{os.path.abspath(self.db_path)}?mode=ro"
         return sqlite3.connect(uri, uri=True)
+
+    def _index_local_covers(self) -> Dict[str, str]:
+        """
+        Index NetEase's local album-art store: ``<download_dir>/meta/track-<id>.jpg``.
+
+        The desktop client writes one full-resolution JPEG per downloaded track
+        (sometimes duplicated as ``track-<id> (1).jpg``). This lets the pipeline
+        normalize covers fully offline instead of re-downloading them.
+        """
+        meta_dir = os.path.join(self.download_dir, "meta")
+        index: Dict[str, str] = {}
+        if not os.path.isdir(meta_dir):
+            return index
+
+        pattern = re.compile(r"^track-(\d+)(?: \((\d+)\))?\.(jpg|jpeg|png)$", re.IGNORECASE)
+        try:
+            entries = os.listdir(meta_dir)
+        except OSError:
+            return index
+
+        for name in entries:
+            match = pattern.match(name)
+            if not match:
+                continue
+            track_id = match.group(1)
+            is_duplicate = match.group(2) is not None
+            existing = index.get(track_id)
+            if existing is None or (is_duplicate is False and " (" in os.path.basename(existing)):
+                index[track_id] = os.path.join(meta_dir, name)
+        return index
+
+    def resolve_local_cover(self, track_id: str) -> str:
+        """Return the local cover path for a NetEase track ID ('' when absent)."""
+        clean_id = str(track_id or "").replace("track-", "").strip()
+        if not clean_id:
+            return ""
+        return self._index_local_covers().get(clean_id, "")
 
     def get_all_playlists(self, preferred_creator: Optional[str] = None, only_preferred: bool = False) -> List[Dict[str, Any]]:
         """
@@ -169,6 +209,8 @@ class NetEaseDBProvider:
             except Exception:
                 pass
 
+        local_covers = self._index_local_covers()
+
         # Step 2: Pre-index offlineTrack for fast local file matching
         cur.execute("SELECT id, newRelativePath, size, trackName, artistName FROM offlineTrack")
         offline_map = {}
@@ -209,6 +251,7 @@ class NetEaseDBProvider:
             artist = "未知艺术家"
             album = "未知专辑"
             duration_ms = 0
+            pic_url = ""
 
             # 1. Query db_track_map
             if str(tid) in db_track_map:
@@ -218,6 +261,7 @@ class NetEaseDBProvider:
                 if artist_list:
                     artist = " / ".join(artist_list)
                 album = obj.get("album", {}).get("name") or album
+                pic_url = obj.get("album", {}).get("picUrl") or ""
                 duration_ms = obj.get("duration") or 0
             else:
                 # 2. Query requestCache fallback
@@ -236,6 +280,7 @@ class NetEaseDBProvider:
                                 if artist_list:
                                     artist = " / ".join(artist_list)
                                 album = s.get("al", {}).get("name") or album
+                                pic_url = s.get("al", {}).get("picUrl") or ""
                                 duration_ms = s.get("dt") or 0
                                 break
                     except Exception:
@@ -265,7 +310,9 @@ class NetEaseDBProvider:
                 "duration_sec": round(duration_ms / 1000.0, 1),
                 "size_bytes": size_bytes,
                 "local_file_path": local_path,
-                "is_downloaded": is_downloaded
+                "is_downloaded": is_downloaded,
+                "pic_url": pic_url,
+                "cover_local_path": local_covers.get(str(tid), "")
             })
 
         conn.close()
@@ -298,7 +345,7 @@ class NetEaseDBProvider:
             main_artist = artist_candidates[0] if artist_candidates else "未知艺术家"
 
             albums.append({
-                "id": f"alb_{abs(hash(album_name)) % 10000000}",
+                "id": f"alb_{hashlib.md5(album_name.encode('utf-8')).hexdigest()[:10]}",
                 "type": "album",
                 "name": album_name,
                 "main_artist": main_artist,
@@ -319,6 +366,8 @@ class NetEaseDBProvider:
 
         conn = self._get_connection()
         cur = conn.cursor()
+
+        local_covers = self._index_local_covers()
 
         cur.execute("""
             SELECT id, trackName, artistName, albumName, newRelativePath, size, jsonStr
@@ -358,7 +407,8 @@ class NetEaseDBProvider:
                 "size_bytes": size or 0,
                 "local_file_path": full_path,
                 "is_downloaded": bool(full_path and os.path.exists(full_path)),
-                "pic_url": pic_url
+                "pic_url": pic_url,
+                "cover_local_path": local_covers.get(str(tid).replace("track-", ""), "")
             })
 
         conn.close()

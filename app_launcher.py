@@ -2,14 +2,20 @@
 """
 FiiO Echo Studio - Native Desktop App Launcher
 Powers the standalone macOS Application using WKWebView (pywebview)
-and background HTTP Engine.
+and a background HTTP engine.
+
+Usage:
+    FiiO Echo Studio            # normal GUI window
+    FiiO Echo Studio --headless --port 58999
+                                # API only (for smoke tests / CI), no window
 """
+import argparse
 import os
-import sys
 import socket
+import sys
 import threading
 import time
-from http.server import HTTPServer
+from http.server import ThreadingHTTPServer
 
 # Add project root to sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -31,32 +37,46 @@ def find_free_port(preferred: int = 57123) -> int:
 
 def start_server_in_thread(port: int):
     """Runs the API & static asset server in background thread."""
-    server_address = ("127.0.0.1", port)
-    httpd = HTTPServer(server_address, StudioAPIHandler)
-    t = threading.Thread(target=httpd.serve_forever, daemon=True)
-    t.start()
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), StudioAPIHandler)
+    httpd.daemon_threads = True
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
     return httpd
 
 
-def main():
-    import webview
+def main() -> None:
+    parser = argparse.ArgumentParser(description="FiiO Echo Studio desktop app")
+    parser.add_argument("--headless", action="store_true", help="run the API only (no window)")
+    parser.add_argument("--port", type=int, default=0, help="fixed port (default: auto)")
+    args = parser.parse_args()
 
-    port = find_free_port()
-    print(f"Starting FiiO Echo Studio Engine on port {port}...")
+    port = args.port or find_free_port()
     httpd = start_server_in_thread(port)
+    print(f"Starting FiiO Echo Studio Engine on http://127.0.0.1:{port} ...", flush=True)
     time.sleep(0.2)
 
-    target_url = f"http://127.0.0.1:{port}"
+    if args.headless:
+        print("Headless mode: press Ctrl+C to stop.", flush=True)
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            print("Shutting down...", flush=True)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+        return
 
-    window = webview.create_window(
+    import webview
+
+    webview.create_window(
         title="FiiO Echo Studio",
-        url=target_url,
+        url=f"http://127.0.0.1:{port}",
         width=1340,
         height=840,
         min_size=(980, 640),
-        text_select=True
+        text_select=True,
     )
-
     webview.start(debug=False)
     print("Application window closed.")
 
