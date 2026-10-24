@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FIIO ECHO STUDIO — Local Library Normalizer & Workbench</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    /* Standalone Swiss Paper & Dark Mode Theme Tokens */
+    :root, html.light {
+      --background: #F4F4F0;
+      --card: #FAF9F5;
+      --sidebar: #EAE9E4;
+      --foreground: #111111;
+      --muted-foreground: #686863;
+      --border: #111111;
+    }
+    html.dark {
+      --background: #111111;
+      --card: #181818;
+      --sidebar: #202020;
+      --foreground: #F4F4F0;
+      --muted-foreground: #9A9A95;
+      --border: #383838;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Inter", "PingFang SC", sans-serif;
+      margin: 0;
+      padding: 0;
+      overflow: hidden; /* Viewport-locked Studio App */
+      height: 100dvh;
+      width: 100vw;
+    }
+
+    .swiss-mono {
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Exposed 1px Swiss Grid Borders */
+    .swiss-border-r { border-right: 1px solid var(--border); }
+    .swiss-border-l { border-left: 1px solid var(--border); }
+    .swiss-border-b { border-bottom: 1px solid var(--border); }
+    .swiss-border-t { border-top: 1px solid var(--border); }
+
+    /* Modern Web Guidance: responsive-table with sticky headers */
+    .table-wrapper {
+      overflow-y: auto;
+      overflow-x: auto;
+      max-inline-size: 100%;
+      container-type: inline-size;
+      scrollbar-gutter: stable;
+    }
+    .table-wrapper table {
+      border-collapse: separate;
+      border-spacing: 0;
+      width: 100%;
+    }
+    .table-wrapper thead {
+      position: sticky;
+      inset-block-start: 0;
+      z-index: 2;
+    }
+    .table-wrapper tbody th {
+      position: sticky;
+      inset-inline-start: 0;
+      z-index: 1;
+      background: var(--card);
+    }
+    @container (width < 450px) {
+      .table-wrapper .col-secondary { display: none; }
+    }
+
+    /* Custom Swiss Toggle Checkbox */
+    .swiss-check {
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border: 1.5px solid var(--foreground);
+      display: inline-grid;
+      place-content: center;
+      cursor: pointer;
+      background: transparent;
+      flex-shrink: 0;
+    }
+    .swiss-check::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      transform: scale(0);
+      background-color: #FF3300;
+      transition: 80ms transform ease-in-out;
+    }
+    .swiss-check:checked::before { transform: scale(1); }
+
+    .workbench-grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      flex: 1 1 0%;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .panel-scroll {
+      overflow-y: auto;
+      min-height: 0;
+      flex: 1 1 0%;
+    }
+  </style>
+</head>
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased select-none flex flex-col">
+
+  <!-- ===================================================================== -->
+  <!-- TOP SWISS HEADER BAR                                                  -->
+  <!-- ===================================================================== -->
+  <header class="grid grid-cols-12 swiss-border-b bg-[var(--sidebar)] shrink-0">
+    <!-- Brand Title -->
+    <div class="col-span-12 md:col-span-5 xl:col-span-4 px-4 py-2.5 swiss-border-r flex items-center justify-between">
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="inline-block w-2.5 h-2.5 bg-[#FF3300] shrink-0"></span>
+          <h1 class="font-bold tracking-tight text-sm uppercase truncate">SNOWSKY / FIIO ECHO STUDIO</h1>
+        </div>
+        <p class="text-xs text-[var(--muted-foreground)] swiss-mono truncate">LOCAL LIBRARY NORMALIZER // v0.3 WORKBENCH</p>
+      </div>
+      <div class="flex items-center gap-1.5 shrink-0 ml-2">
+        <span id="viewport-badge" class="swiss-mono text-xs px-2 py-0.5 border border-[var(--border)] bg-[var(--card)] font-bold">
+          3-COL WORKBENCH
+        </span>
+      </div>
+    </div>
+
+    <!-- Center Spec / Target Directory Display -->
+    <div class="hidden xl:flex xl:col-span-5 px-4 py-2.5 swiss-border-r items-center justify-between">
+      <div class="grid grid-cols-3 gap-4 w-full swiss-mono">
+        <div>
+          <div class="text-xs text-[var(--muted-foreground)]">TARGET PROFILE</div>
+          <div class="text-xs font-bold mt-0.5">FIIO ECHO <span class="font-normal text-[var(--muted-foreground)]">(FLAC ≤4096)</span></div>
+        </div>
+        <div>
+          <div class="text-xs text-[var(--muted-foreground)]">COVER SPEC</div>
+          <div class="text-xs font-bold mt-0.5">500×500 <span class="font-normal text-[var(--muted-foreground)]">YUV420P</span></div>
+        </div>
+        <div>
+          <div class="text-xs text-[var(--muted-foreground)]">OUTPUT STRUCTURE</div>
+          <div class="text-xs font-bold mt-0.5">ALBUMS / PLAYLISTS</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Local Library Root Path Setting -->
+    <div class="col-span-12 md:col-span-7 xl:col-span-3 px-4 py-2 flex items-center justify-between gap-2">
+      <div class="min-w-0 flex-1">
+        <div class="text-xs text-[var(--muted-foreground)] swiss-mono flex items-center gap-1">
+          <span>LOCAL LIBRARY ROOT:</span>
+        </div>
+        <div class="flex items-center gap-1 mt-0.5">
+          <input id="lib-path-input" type="text" value="~/Music/FiiO_Echo_Library" class="bg-[var(--background)] border border-[var(--border)] px-1.5 py-0.5 text-xs swiss-mono w-full truncate focus:outline-none" />
+          <button id="btn-browse-dir" class="text-xs swiss-mono px-2 py-0.5 border border-[var(--border)] hover:bg-[var(--card)] font-bold cursor-pointer shrink-0">
+            BROWSE
+          </button>
+        </div>
+      </div>
+      <div class="flex items-center gap-1 shrink-0 ml-1">
+        <button id="btn-theme-toggle" class="text-xs swiss-mono px-1.5 py-1 border border-[var(--border)] hover:bg-[var(--background)] transition-colors cursor-pointer" title="切换深色/浅色模式">
+          ◐
+        </button>
+        <button id="btn-reset-demo" class="text-xs swiss-mono px-1.5 py-1 border border-[var(--border)] hover:bg-[var(--background)] transition-colors cursor-pointer">
+          ↻
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===================================================================== -->
+  <!-- ADAPTIVE NAVIGATION BAR (VISIBLE WHEN < 1180px)                       -->
+  <!-- ===================================================================== -->
+  <nav id="adaptive-subnav" class="xl:hidden swiss-border-b bg-[var(--card)] px-4 py-2 flex items-center justify-between shrink-0">
+    <div class="flex md:hidden items-center gap-1 w-full swiss-mono text-xs">
+      <button data-pane="01" class="pane-tab flex-1 py-1.5 px-2 border border-[var(--border)] font-bold bg-[var(--foreground)] text-[var(--background)] cursor-pointer">
+        01 INGEST / CLASSIFY
+      </button>
+      <button data-pane="02" class="pane-tab flex-1 py-1.5 px-2 border border-[var(--border)] font-bold bg-[var(--background)] text-[var(--foreground)] cursor-pointer">
+        02 SPEC MATRIX
+      </button>
+      <button data-pane="03" class="pane-tab flex-1 py-1.5 px-2 border border-[var(--border)] font-bold bg-[var(--background)] text-[var(--foreground)] cursor-pointer">
+        03 LOCAL LIBRARY
+      </button>
+    </div>
+
+    <div class="hidden md:flex items-center justify-between w-full swiss-mono text-xs">
+      <div class="flex items-center gap-2">
+        <span class="px-1.5 py-0.5 bg-[#FF3300] text-white font-bold">SPLIT VIEW</span>
+        <span class="text-[var(--muted-foreground)]">左侧固定分类队列，右侧切换参数检视与本地乐库结构</span>
+      </div>
+      <div class="flex items-center gap-1">
+        <button id="split-tab-02" class="py-1 px-3 border border-[var(--border)] font-bold bg-[var(--foreground)] text-[var(--background)] cursor-pointer">
+          02 SPEC MATRIX
+        </button>
+        <button id="split-tab-03" class="py-1 px-3 border border-[var(--border)] font-bold bg-[var(--background)] text-[var(--foreground)] cursor-pointer">
+          03 LOCAL LIBRARY
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ===================================================================== -->
+  <!-- MAIN WORKBENCH GRID                                                   -->
+  <!-- ===================================================================== -->
+  <main class="workbench-grid bg-[var(--card)]">
+
+    <!-- =================================================================== -->
+    <!-- COLUMN 01: SOURCE INGEST & DUAL-MODE CLASSIFIER                     -->
+    <!-- =================================================================== -->
+    <section id="col-01" class="col-span-12 md:col-span-6 xl:col-span-5 swiss-border-r flex flex-col min-h-0 h-full">
+      <!-- Section Header -->
+      <div class="px-3.5 py-2.5 swiss-border-b flex items-center justify-between bg-[var(--sidebar)] shrink-0">
+        <div class="flex items-center gap-2">
+          <span class="swiss-mono text-xs font-bold px-1.5 py-0.5 bg-[var(--foreground)] text-[var(--background)]">01</span>
+          <h2 class="text-xs font-bold uppercase tracking-wider">AUDIO INGEST &amp; CLASSIFICATION</h2>
+        </div>
+        <span id="queue-counter" class="swiss-mono text-xs text-[var(--muted-foreground)]">10 TRACKS</span>
+      </div>
+
+      <!-- Mode 1 & 2 Tab Switcher -->
+      <div class="p-2.5 swiss-border-b bg-[var(--background)] shrink-0">
+        <div class="grid grid-cols-2 gap-1.5 swiss-mono text-xs mb-2">
+          <button id="btn-mode-db" class="py-1.5 px-2 border border-[var(--border)] font-bold bg-[var(--foreground)] text-[var(--background)] cursor-pointer text-left flex items-center justify-between">
+            <span>A. 网易云本地数据库导入</span>
+            <span class="text-xs px-1 bg-[#FF3300] text-white">AUTO</span>
+          </button>
+          <button id="btn-mode-manual" class="py-1.5 px-2 border border-[var(--border)] font-bold bg-[var(--card)] text-[var(--foreground)] hover:bg-[var(--sidebar)] cursor-pointer text-left flex items-center justify-between">
+            <span>B. 手动创建/编排分类</span>
+            <span class="text-xs text-[var(--muted-foreground)]">MANUAL</span>
+          </button>
+        </div>
+
+        <!-- Mode A View: NetEase SQLite DB Scan -->
+        <div id="panel-mode-db" class="flex flex-col gap-1.5">
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-[var(--muted-foreground)] swiss-mono">网易云歌单 / 专辑探测:</span>
+            <button id="btn-scan-db" class="text-xs swiss-mono px-2 py-0.5 border border-[var(--border)] bg-[var(--card)] hover:border-[#FF3300] font-bold cursor-pointer">
+              ↻ 重新扫描网易云 DB
+            </button>
+          </div>
+          <div class="flex items-center gap-2">
+            <select id="select-db-collection" aria-label="Select NetEase Playlist" class="bg-[var(--card)] border border-[var(--border)] px-2 py-1 text-xs font-semibold swiss-mono w-full cursor-pointer focus:outline-none">
+              <option value="blonde">专辑: Frank Ocean — Blonde (17 首完整匹配)</option>
+              <option value="ram">专辑: Daft Punk — Random Access Memories (13 首)</option>
+              <option value="my_fav">歌单: 我喜欢的音乐 (240 首已下载)</option>
+            </select>
+            <button id="btn-apply-db-classify" class="text-xs swiss-mono px-3 py-1 bg-[#FF3300] hover:bg-[#e02d00] text-white font-bold cursor-pointer shrink-0">
+              一键按 DB 分类
+            </button>
+          </div>
+        </div>
+
+        <!-- Mode B View: Manual Playlist & Track Moving -->
+        <div id="panel-mode-manual" class="hidden flex-col gap-1.5">
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-[var(--muted-foreground)] swiss-mono">手动分类操作栏:</span>
+            <div class="flex items-center gap-1">
+              <button id="btn-new-collection" class="text-xs swiss-mono px-2 py-0.5 border border-[var(--border)] bg-[var(--card)] font-bold cursor-pointer hover:border-[#FF3300]">
+                + 新建专辑/歌单
+              </button>
+            </div>
+          </div>
+          <div class="grid grid-cols-12 gap-1.5">
+            <select id="select-target-dest" aria-label="Select Target Destination Collection" class="col-span-8 bg-[var(--card)] border border-[var(--border)] px-2 py-1 text-xs font-semibold swiss-mono cursor-pointer focus:outline-none">
+              <option value="alb_blonde">目标: Albums/Blonde</option>
+              <option value="pl_night">目标: Playlists/Late Night Drive</option>
+              <option value="alb_ram">目标: Albums/Random Access Memories</option>
+            </select>
+            <button id="btn-move-to-dest" class="col-span-4 text-xs swiss-mono px-2 py-1 border border-[var(--foreground)] bg-[var(--foreground)] text-[var(--background)] hover:bg-[#FF3300] hover:border-[#FF3300] font-bold cursor-pointer truncate">
+              移入所选分类 →
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filter & Batch Selection Bar -->
+      <div class="px-3.5 py-1.5 swiss-border-b flex items-center justify-between text-xs swiss-mono bg-[var(--sidebar)] shrink-0">
+        <div class="flex items-center gap-2">
+          <label class="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" id="check-select-all" class="swiss-check" />
+            <span class="font-bold">全选</span>
+          </label>
+          <span class="text-[var(--muted-foreground)]">|</span>
+          <button data-filter="all" class="filter-btn font-bold underline decoration-[#FF3300] decoration-2 underline-offset-4 cursor-pointer">ALL (10)</button>
+          <span class="text-[var(--muted-foreground)]">/</span>
+          <button data-filter="issues" class="filter-btn text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer">待规范 (7)</button>
+          <span class="text-[var(--muted-foreground)]">/</span>
+          <button data-filter="ok" class="filter-btn text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer">已合规 (3)</button>
+        </div>
+        <div class="flex items-center gap-1">
+          <button id="btn-move-up" class="px-1.5 py-0.5 border border-[var(--border)] bg-[var(--card)] font-bold cursor-pointer" title="上移曲目序号">↑</button>
+          <button id="btn-move-down" class="px-1.5 py-0.5 border border-[var(--border)] bg-[var(--card)] font-bold cursor-pointer" title="下移曲目序号">↓</button>
+        </div>
+      </div>
+
+      <!-- Track Queue Table -->
+      <div tabindex="0" role="region" aria-labelledby="queue-table-caption" class="table-wrapper panel-scroll">
+        <table class="text-left text-xs">
+          <caption id="queue-table-caption" class="sr-only">Audio queue with manual and automated classification</caption>
+          <thead class="bg-[var(--sidebar)] text-[var(--muted-foreground)] swiss-mono uppercase">
+            <tr>
+              <th class="py-2 px-2 swiss-border-b font-semibold w-8">#</th>
+              <th class="py-2 px-2 swiss-border-b font-semibold">TRACK / TITLE</th>
+              <th class="py-2 px-2 swiss-border-b font-semibold">TARGET FOLDER</th>
+              <th class="py-2 px-2 swiss-border-b font-semibold col-secondary">BLOCK</th>
+              <th class="py-2 px-2 swiss-border-b font-semibold col-secondary">COVER</th>
+              <th class="py-2 px-3 swiss-border-b font-semibold text-right">STATE</th>
+            </tr>
+          </thead>
+          <tbody id="track-tbody" class="swiss-mono divide-y divide-[var(--border)]">
+            <!-- Populated by JS -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Column 01 Footer Summary -->
+      <div class="px-3.5 py-2.5 swiss-border-t bg-[var(--sidebar)] flex items-center justify-between text-xs swiss-mono shrink-0">
+        <span class="truncate">NAMING: <strong class="font-semibold">{01..N} {Artist} - {Title}.flac</strong></span>
+        <span id="summary-issues-badge" class="px-2 py-0.5 bg-[#FF3300] text-white font-bold shrink-0">7 NON-COMPLIANT</span>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- COLUMN 02: HARDWARE COMPLIANCE INSPECTOR                            -->
+    <!-- =================================================================== -->
+    <section id="col-02" class="col-span-12 md:col-span-6 xl:col-span-4 swiss-border-r flex flex-col min-h-0 h-full">
+      <!-- Section Header -->
+      <div class="px-3.5 py-2.5 swiss-border-b flex items-center justify-between bg-[var(--sidebar)] shrink-0">
+        <div class="flex items-center gap-2">
+          <span class="swiss-mono text-xs font-bold px-1.5 py-0.5 bg-[var(--foreground)] text-[var(--background)]">02</span>
+          <h2 class="text-xs font-bold uppercase tracking-wider">SPECIFICATION MATRIX</h2>
+        </div>
+        <span id="inspector-track-id" class="swiss-mono text-xs font-bold text-[#FF3300]">TRACK #01</span>
+      </div>
+
+      <!-- Inspector Content Body -->
+      <div class="panel-scroll divide-y divide-[var(--border)]">
+        <!-- Selected Track Summary -->
+        <div class="p-3.5 grid grid-cols-12 gap-3.5 items-center">
+          <div class="col-span-4 aspect-square max-w-[110px] border border-[var(--border)] bg-[var(--sidebar)] relative flex flex-col justify-between p-1.5 overflow-hidden">
+            <div class="flex justify-between items-start z-10">
+              <span class="swiss-mono text-xs font-bold px-1 bg-[var(--card)] border border-[var(--border)]" id="cover-badge-type">TYPE 3</span>
+            </div>
+            <div class="my-auto flex items-center justify-center">
+              <div class="w-9 h-9 rounded-full bg-[#FF3300] opacity-90"></div>
+              <div class="w-9 h-9 border-2 border-[var(--foreground)] -ml-3"></div>
+            </div>
+            <div class="z-10 bg-[var(--card)] px-1 py-0.5 border border-[var(--border)] text-center">
+              <div id="cover-dim-label" class="swiss-mono text-xs font-bold truncate">1400×1400</div>
+            </div>
+          </div>
+
+          <div class="col-span-8 space-y-1 min-w-0">
+            <div class="swiss-mono text-xs text-[var(--muted-foreground)] truncate" id="insp-source-file">SOURCE: Frank Ocean - Nikes.ncm</div>
+            <h3 class="text-sm font-bold tracking-tight leading-snug truncate" id="insp-title">01 Frank Ocean - Nikes.flac</h3>
+            <p class="text-xs text-[var(--muted-foreground)] truncate" id="insp-dest">Target: Albums/Blonde/01 Frank Ocean - Nikes.flac</p>
+            <div class="pt-1 flex flex-wrap gap-1.5 swiss-mono text-xs" id="insp-tags"></div>
+          </div>
+        </div>
+
+        <!-- 1. FLAC Stream & Frame Buffer -->
+        <div class="p-3.5">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-bold uppercase tracking-wider">A. 音频流与帧大小 (FLAC STREAMINFO)</span>
+            <span id="diag-audio-badge" class="swiss-mono text-xs px-1.5 py-0.5 font-bold bg-[#FF3300] text-white">REFRAME REQUIRED</span>
+          </div>
+          <div class="grid grid-cols-3 gap-2 swiss-mono text-xs bg-[var(--background)] p-2 border border-[var(--border)]">
+            <div>
+              <div class="text-[var(--muted-foreground)]">PCM SPEC</div>
+              <div id="diag-pcm" class="font-bold mt-0.5">24bit / 96kHz</div>
+            </div>
+            <div>
+              <div class="text-[var(--muted-foreground)]">CURRENT BLOCK</div>
+              <div id="diag-block-cur" class="font-bold text-[#FF3300] mt-0.5">8192 (ERR)</div>
+            </div>
+            <div>
+              <div class="text-[var(--muted-foreground)]">TARGET BLOCK</div>
+              <div id="diag-block-tar" class="font-bold text-emerald-600 mt-0.5">4096 (SAFE)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Album Cover Art Spec -->
+        <div class="p-3.5">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-bold uppercase tracking-wider">B. 专辑封面格式规范 (PICTURE BLOCK)</span>
+            <span id="diag-cover-badge" class="swiss-mono text-xs px-1.5 py-0.5 font-bold bg-[#FF3300] text-white">CONVERT 4:2:0</span>
+          </div>
+          <div class="grid grid-cols-3 gap-2 swiss-mono text-xs bg-[var(--background)] p-2 border border-[var(--border)]">
+            <div>
+              <div class="text-[var(--muted-foreground)]">RESOLUTION</div>
+              <div id="diag-cov-res" class="font-bold mt-0.5">1400 → 500px</div>
+            </div>
+            <div>
+              <div class="text-[var(--muted-foreground)]">CHROMA SUB</div>
+              <div id="diag-cov-yuv" class="font-bold text-[#FF3300] mt-0.5">4:4:4 → 4:2:0</div>
+            </div>
+            <div>
+              <div class="text-[var(--muted-foreground)]">ENCODING</div>
+              <div id="diag-cov-enc" class="font-bold mt-0.5">Baseline JPG</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Companion LRC Sanitizer -->
+        <div class="p-3.5">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-bold uppercase tracking-wider">C. 伴随歌词清洗 (.LRC SANITIZER)</span>
+            <div class="flex items-center gap-1 swiss-mono text-xs">
+              <button id="btn-lrc-raw" class="px-1.5 py-0.5 border border-[var(--border)] bg-[var(--background)] cursor-pointer">RAW</button>
+              <button id="btn-lrc-clean" class="px-1.5 py-0.5 border border-[var(--border)] bg-[var(--foreground)] text-[var(--background)] font-bold cursor-pointer">CLEANED</button>
+            </div>
+          </div>
+          <pre id="lrc-preview-box" class="swiss-mono text-xs p-2 bg-[var(--background)] border border-[var(--border)] overflow-x-auto leading-relaxed min-h-[76px]"></pre>
+        </div>
+      </div>
+
+      <!-- Quick Single-Track Action -->
+      <div class="px-3.5 py-2.5 swiss-border-t bg-[var(--sidebar)] flex items-center justify-between shrink-0">
+        <span class="swiss-mono text-xs text-[var(--muted-foreground)] truncate mr-2" id="single-track-hint">STATUS: PENDING NORMALIZATION</span>
+        <button id="btn-fix-single" class="swiss-mono text-xs font-bold px-3 py-1 border border-[var(--foreground)] hover:bg-[var(--foreground)] hover:text-[var(--background)] transition-colors cursor-pointer shrink-0">
+          NORMALIZE TRACK →
+        </button>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- COLUMN 03: LOCAL LIBRARY ARCHITECTURE                               -->
+    <!-- =================================================================== -->
+    <section id="col-03" class="col-span-12 md:col-span-6 xl:col-span-3 flex flex-col min-h-0 h-full">
+      <!-- Section Header -->
+      <div class="px-3.5 py-2.5 swiss-border-b flex items-center justify-between bg-[var(--sidebar)] shrink-0">
+        <div class="flex items-center gap-2">
+          <span class="swiss-mono text-xs font-bold px-1.5 py-0.5 bg-[var(--foreground)] text-[var(--background)]">03</span>
+          <h2 class="text-xs font-bold uppercase tracking-wider">LOCAL LIBRARY</h2>
+        </div>
+        <span id="library-status-badge" class="swiss-mono text-xs font-bold text-amber-600">STAGING</span>
+      </div>
+
+      <!-- Scrollable Local Library Content -->
+      <div class="panel-scroll divide-y divide-[var(--border)]">
+        <!-- 1. Output Summary Metric Cards -->
+        <div class="p-3.5">
+          <div class="text-xs font-bold uppercase tracking-wider mb-2">LIBRARY METRICS</div>
+          <div class="grid grid-cols-2 gap-2 swiss-mono text-xs">
+            <div class="p-2 border border-[var(--border)] bg-[var(--background)]">
+              <div class="text-[var(--muted-foreground)]">COLLECTIONS</div>
+              <div id="stat-col-count" class="text-sm font-bold mt-0.5">1 ALBUM / 0 PL</div>
+            </div>
+            <div class="p-2 border border-[var(--border)] bg-[var(--background)]">
+              <div class="text-[var(--muted-foreground)]">TOTAL AUDIO SIZE</div>
+              <div id="stat-total-size" class="text-sm font-bold mt-0.5">376.5 MB</div>
+            </div>
+            <div class="p-2 border border-[var(--border)] bg-[var(--background)]">
+              <div class="text-[var(--muted-foreground)]">COMPANION LRC</div>
+              <div class="text-sm font-bold mt-0.5 text-emerald-600">10 / 10 PAIR</div>
+            </div>
+            <div class="p-2 border border-[var(--border)] bg-[var(--background)]">
+              <div class="text-[var(--muted-foreground)]">META MANIFEST</div>
+              <div class="text-sm font-bold mt-0.5">echo_library.json</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Interactive Local Library Directory Tree Preview -->
+        <div class="p-3.5">
+          <div class="flex items-center justify-between text-xs swiss-mono mb-2">
+            <span class="font-bold">DIRECTORY STRUCTURE PREVIEW</span>
+            <span class="text-[var(--muted-foreground)] text-xs">AUTOMATIC TREE</span>
+          </div>
+          <div id="directory-tree-view" class="bg-[var(--background)] border border-[var(--border)] p-2.5 swiss-mono text-xs space-y-1">
+            <!-- Dynamically populated by JS -->
+          </div>
+        </div>
+
+        <!-- 3. Optional Manual TF Card Copier Helper -->
+        <div class="p-3.5 bg-[var(--sidebar)]/40">
+          <div class="text-xs font-bold uppercase tracking-wider mb-1">OPTIONAL: TF CARD UTILITY</div>
+          <p class="text-xs text-[var(--muted-foreground)] mb-2 leading-relaxed">
+            用户将乐库手动拷入播放器 TF 卡后，可在此一键修复 FAT32 物理目录槽位与清理 Mac 隐藏文件：
+          </p>
+          <div class="grid grid-cols-2 gap-2">
+            <button id="btn-fat-sort" class="text-xs swiss-mono p-2 border border-[var(--border)] bg-[var(--card)] hover:border-[#FF3300] font-bold cursor-pointer text-left">
+              <div>⚡ FAT32 物理排序</div>
+              <div class="text-[var(--muted-foreground)] font-normal text-xs mt-0.5">重排 TF 根目录</div>
+            </button>
+            <button id="btn-dot-clean" class="text-xs swiss-mono p-2 border border-[var(--border)] bg-[var(--card)] hover:border-[#FF3300] font-bold cursor-pointer text-left">
+              <div>🧹 清除 macOS 幽灵</div>
+              <div class="text-[var(--muted-foreground)] font-normal text-xs mt-0.5">dot_clean ._* 净化</div>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Master Build Button: Generates Local Library -->
+      <div class="p-3 swiss-border-t bg-[var(--sidebar)] shrink-0">
+        <button id="btn-build-library" class="w-full py-2.5 px-4 bg-[#FF3300] hover:bg-[#e02d00] text-white font-bold swiss-mono text-xs tracking-wider uppercase flex items-center justify-between cursor-pointer transition-colors">
+          <span>BUILD LOCAL LIBRARY</span>
+          <span id="btn-exec-arrow">→</span>
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ===================================================================== -->
+  <!-- BOTTOM TELEMETRY BAR                                                  -->
+  <!-- ===================================================================== -->
+  <footer class="grid grid-cols-12 swiss-border-t bg-[var(--sidebar)] text-xs swiss-mono shrink-0">
+    <div class="col-span-12 md:col-span-8 py-2 px-4 swiss-border-r flex items-center gap-3 overflow-hidden">
+      <span class="px-1.5 py-0.5 bg-[var(--foreground)] text-[var(--background)] font-bold shrink-0">TELEMETRY</span>
+      <span id="telemetry-log" class="truncate text-[var(--muted-foreground)]">
+        [READY] Mode A (NetEase DB Auto-Classify) active. Set your Local Library Root and click "BUILD LOCAL LIBRARY".
+      </span>
+    </div>
+    <div class="col-span-12 md:col-span-4 py-2 px-4 flex items-center justify-between gap-4">
+      <div class="w-full bg-[var(--background)] h-2 border border-[var(--border)] overflow-hidden">
+        <div id="global-progress-bar" class="bg-[#FF3300] h-full transition-all duration-200" style="width: 30%"></div>
+      </div>
+      <span id="global-progress-text" class="font-bold shrink-0">3/10 OK</span>
+    </div>
+  </footer>
+
+  <script>
+    const INITIAL_TRACKS = [
+      {
+        id: 1, seq: "01", title: "Nikes", artist: "Frank Ocean", album: "Blonde",
+        collectionType: "album", collectionName: "Blonde", targetFolder: "Albums/Blonde",
+        durationSec: 314.2, sizeBytes: 64219080,
+        srcExt: ".ncm", pcm: "24bit / 96kHz", blockSize: 8192, coverRes: "1400×1400", coverYuv: "4:4:4", coverType: 3, lrcState: "JSON_DIRTY", status: "NEEDS_FIX",
+        rawLrc: `{"t":0,"c":[{"tx":"作词 : Frank Ocean"}]}\n[00:14.128]These bitches want Nikes\n[00:17.890]They looking for a check`,
+        cleanLrc: `[00:00.00]作词 : Frank Ocean\r\n[00:14.12]These bitches want Nikes\r\n[00:17.89]They looking for a check`
+      },
+      {
+        id: 2, seq: "02", title: "Ivy", artist: "Frank Ocean", album: "Blonde",
+        collectionType: "album", collectionName: "Blonde", targetFolder: "Albums/Blonde",
+        durationSec: 249.1, sizeBytes: 28410520,
+        srcExt: ".flac", pcm: "16bit / 44.1kHz", blockSize: 4096, coverRes: "500×500", coverYuv: "4:2:0", coverType: 3, lrcState: "CLEAN", status: "COMPLIANT",
+        rawLrc: `[00:07.15]I thought that I was dreaming\r\n[00:11.04]When you said you love me`,
+        cleanLrc: `[00:07.15]I thought that I was dreaming\r\n[00:11.04]When you said you love me`
+      },
+      {
+        id: 3, seq: "03", title: "Pink + White", artist: "Frank Ocean", album: "Blonde",
+        collectionType: "album", collectionName: "Blonde", targetFolder: "Albums/Blonde",
+        durationSec: 184.6, sizeBytes: 52189440,
+        srcExt: ".ncm", pcm: "24bit / 96kHz", blockSize: 8192, coverRes: "1115×1115", coverYuv: "4:4:4", coverType: 3, lrcState: "JSON_DIRTY", status: "NEEDS_FIX",
+        rawLrc: `{"t":120,"c":[{"tx":"编曲 : Pharrell Williams"}]}\n[00:03.456]That's the way everyday goes\n[00:07.112]Every time we've no control`,
+        cleanLrc: `[00:00.12]编曲 : Pharrell Williams\r\n[00:03.45]That's the way everyday goes\r\n[00:07.11]Every time we've no control`
+      },
+      {
+        id: 4, seq: "04", title: "Be Yourself", artist: "Frank Ocean", album: "Blonde",
+        collectionType: "album", collectionName: "Blonde", targetFolder: "Albums/Blonde",
+        durationSec: 86.9, sizeBytes: 9410320,
+        srcExt: ".flac", pcm: "16bit / 44.1kHz", blockSize: 4096, coverRes: "500×500", coverYuv: "4:2:0", coverType: 3, lrcState: "CLEAN", status: "COMPLIANT",
+        rawLrc: `[00:01.20]Many college students have gone to college\r\n[00:05.80]And gotten hooked on drugs`,
+        cleanLrc: `[00:01.20]Many college students have gone to college\r\n[00:05.80]And gotten hooked on drugs`
+      },
+      {
+        id: 5, seq: "05", title: "Solo", artist: "Frank Ocean", album: "Blonde",
+        collectionType: "album", collectionName: "Blonde", targetFolder: "Albums/Blonde",
+        durationSec: 257.3, sizeBytes: 58210340,
+        srcExt: ".flac", pcm: "24bit / 96kHz", blockSize: 8192, coverRes: "1080×1080", coverYuv: "4:4:4", coverType: 0, lrcState: "3DIGIT_MS", status: "NEEDS_FIX",
+        rawLrc: `[00:02.987]Hand me a towel, I'm dirty dancing\n[00:06.543]By myself, gone off tabs`,
+        cleanLrc: `[00:02.98]Hand me a towel, I'm dirty dancing\r\n[00:06.54]By myself, gone off tabs`
+      },
+      {
+        id: 6, seq: "06", title: "Skyline To", artist: "Frank Ocean", album: "Blonde",
+        collectionType: "album", collectionName: "Blonde", targetFolder: "Albums/Blonde",
+        durationSec: 184.8, sizeBytes: 41289110,
+        srcExt: ".ncm", pcm: "24bit / 48kHz", blockSize: 8192, coverRes: "1200×1200", coverYuv: "4:4:4", coverType: 3, lrcState: "JSON_DIRTY", status: "NEEDS_FIX",
+        rawLrc: `{"t":0,"c":[{"tx":"制作人 : Frank Ocean"}]}\n[00:04.321]This is joy, this is summer`,
+        cleanLrc: `[00:00.00]制作人 : Frank Ocean\r\n[00:04.32]This is joy, this is summer`
+      },
+      {
+        id: 7, seq: "07", title: "Self Control", artist: "Frank Ocean", album: "Blonde",
+        collectionType: "album", collectionName: "Blonde", targetFolder: "Albums/Blonde",
+        durationSec: 249.7, sizeBytes: 54190820,
+        srcExt: ".flac", pcm: "24bit / 96kHz", blockSize: 4096, coverRes: "1400×1400", coverYuv: "4:4:4", coverType: 3, lrcState: "CLEAN", status: "NEEDS_FIX",
+        rawLrc: `[00:01.50]Pool side convo about your summer last night`,
+        cleanLrc: `[00:01.50]Pool side convo about your summer last night`
+      },
+      {
+        id: 8, seq: "08", title: "Good Guy", artist: "Frank Ocean", album: "Blonde",
+        collectionType: "album", collectionName: "Blonde", targetFolder: "Albums/Blonde",
+        durationSec: 66.8, sizeBytes: 7420100,
+        srcExt: ".flac", pcm: "16bit / 44.1kHz", blockSize: 4096, coverRes: "500×500", coverYuv: "4:2:0", coverType: 3, lrcState: "CLEAN", status: "COMPLIANT",
+        rawLrc: `[00:00.80]Here's to the good guy, he hooked it up`,
+        cleanLrc: `[00:00.80]Here's to the good guy, he hooked it up`
+      },
+      {
+        id: 9, seq: "09", title: "Nights", artist: "Frank Ocean", album: "Blonde",
+        collectionType: "album", collectionName: "Blonde", targetFolder: "Albums/Blonde",
+        durationSec: 307.2, sizeBytes: 68102390,
+        srcExt: ".ncm", pcm: "24bit / 96kHz", blockSize: 8192, coverRes: "1400×1400", coverYuv: "4:4:4", coverType: 3, lrcState: "JSON_DIRTY", status: "NEEDS_FIX",
+        rawLrc: `{"t":0,"c":[{"tx":"Round your city, round the clock"}]}\n[00:05.876]Everybody needs you`,
+        cleanLrc: `[00:00.00]Round your city, round the clock\r\n[00:05.87]Everybody needs you`
+      },
+      {
+        id: 10, seq: "10", title: "White Ferrari", artist: "Frank Ocean", album: "Blonde",
+        collectionType: "album", collectionName: "Blonde", targetFolder: "Albums/Blonde",
+        durationSec: 248.5, sizeBytes: 57129030,
+        srcExt: ".ncm", pcm: "24bit / 96kHz", blockSize: 8192, coverRes: "1400×1400", coverYuv: "4:4:4", coverType: 3, lrcState: "3DIGIT_MS", status: "NEEDS_FIX",
+        rawLrc: `[00:11.432]Bad luck to talk on these rides`,
+        cleanLrc: `[00:11.43]Bad luck to talk on these rides`
+      }
+    ];
+
+    let tracks = JSON.parse(JSON.stringify(INITIAL_TRACKS));
+    let selectedId = 1;
+    let checkedTrackIds = new Set();
+    let activeFilter = "all";
+    let lrcViewMode = "clean";
+    let isBuilding = false;
+
+    // View Modes & Navigation
+    let activeClassifyMode = "db";
+    let splitRightTab = "02";
+    let mobileActiveTab = "01";
+
+    const col01 = document.getElementById("col-01");
+    const col02 = document.getElementById("col-02");
+    const col03 = document.getElementById("col-03");
+    const tbody = document.getElementById("track-tbody");
+    const telemetryLog = document.getElementById("telemetry-log");
+    const treeView = document.getElementById("directory-tree-view");
+
+    function renderDirectoryTree() {
+      // Group tracks by targetFolder
+      const folders = {};
+      let totalBytes = 0;
+      let albumCount = 0;
+      let plCount = 0;
+
+      tracks.forEach(t => {
+        totalBytes += t.sizeBytes;
+        if (!folders[t.targetFolder]) {
+          folders[t.targetFolder] = [];
+          if (t.collectionType === "album") albumCount++;
+          else plCount++;
+        }
+        folders[t.targetFolder].push(t);
+      });
+
+      // Update stat cards
+      document.getElementById("stat-col-count").textContent = `${albumCount} ALBUM / ${plCount} PL`;
+      document.getElementById("stat-total-size").textContent = `${(totalBytes / 1024 / 1024).toFixed(1)} MB`;
+
+      // Build tree HTML
+      let html = `
+        <div class="font-bold text-[var(--foreground)] flex items-center gap-1.5 pb-1 border-b border-[var(--border)]">
+          <span>📁</span> <span>FiiO_Echo_Library/</span>
+          <span class="text-[var(--muted-foreground)] font-normal text-xs ml-auto">ROOT</span>
+        </div>
+        <div class="pl-2 pt-1 text-[var(--muted-foreground)] space-y-1.5">
+          <div class="flex items-center justify-between text-xs">
+            <span>📄 <strong class="text-[#FF3300]">echo_library.json</strong></span>
+            <span class="text-xs px-1 border border-[var(--border)] bg-[var(--card)]">CONFIG</span>
+          </div>
+      `;
+
+      Object.keys(folders).forEach(f => {
+        const trks = folders[f];
+        html += `
+          <div>
+            <div class="font-semibold text-[var(--foreground)] flex items-center justify-between text-xs">
+              <span>📁 ${f}/</span>
+              <span class="text-emerald-600 font-bold text-xs">${trks.length} tracks</span>
+            </div>
+            <div class="pl-4 text-[var(--muted-foreground)] text-xs space-y-0.5 mt-0.5">
+        `;
+        // Show first 2 tracks
+        trks.slice(0, 2).forEach(tk => {
+          html += `<div class="truncate">├── 🎵 ${tk.seq} ${tk.artist} - ${tk.title}.flac</div>`;
+        });
+        if (trks.length > 2) {
+          html += `<div class="text-[var(--muted-foreground)] italic">└── ... and ${trks.length - 2} more (.flac + .lrc)</div>`;
+        }
+        html += `
+            </div>
+          </div>
+        `;
+      });
+
+      html += `</div>`;
+      treeView.innerHTML = html;
+    }
+
+    function applyAdaptiveLayout() {
+      const w = window.innerWidth;
+      const badge = document.getElementById("viewport-badge");
+
+      if (w >= 1180) {
+        badge.textContent = "3-COL WORKBENCH";
+        badge.className = "swiss-mono text-xs px-2 py-0.5 border border-[var(--border)] bg-[var(--card)] font-bold";
+        col01.classList.remove("hidden");
+        col02.classList.remove("hidden");
+        col03.classList.remove("hidden");
+      } else if (w >= 768) {
+        badge.textContent = "SPLIT VIEW (2-COL)";
+        badge.className = "swiss-mono text-xs px-2 py-0.5 bg-[#FF3300] text-white font-bold";
+        col01.classList.remove("hidden");
+        if (splitRightTab === "02") {
+          col02.classList.remove("hidden");
+          col03.classList.add("hidden");
+        } else {
+          col02.classList.add("hidden");
+          col03.classList.remove("hidden");
+        }
+      } else {
+        badge.textContent = "MOBILE VIEW (1-COL)";
+        badge.className = "swiss-mono text-xs px-2 py-0.5 bg-emerald-600 text-white font-bold";
+        col01.classList.toggle("hidden", mobileActiveTab !== "01");
+        col02.classList.toggle("hidden", mobileActiveTab !== "02");
+        col03.classList.toggle("hidden", mobileActiveTab !== "03");
+      }
+    }
+
+    function setSplitRightTab(tab) {
+      splitRightTab = tab;
+      const btn02 = document.getElementById("split-tab-02");
+      const btn03 = document.getElementById("split-tab-03");
+      if (tab === "02") {
+        btn02.className = "py-1 px-3 border border-[var(--border)] font-bold bg-[var(--foreground)] text-[var(--background)] cursor-pointer";
+        btn03.className = "py-1 px-3 border border-[var(--border)] font-bold bg-[var(--background)] text-[var(--foreground)] cursor-pointer";
+      } else {
+        btn03.className = "py-1 px-3 border border-[var(--border)] font-bold bg-[var(--foreground)] text-[var(--background)] cursor-pointer";
+        btn02.className = "py-1 px-3 border border-[var(--border)] font-bold bg-[var(--background)] text-[var(--foreground)] cursor-pointer";
+      }
+      applyAdaptiveLayout();
+    }
+
+    function setMobileTab(tab) {
+      mobileActiveTab = tab;
+      document.querySelectorAll(".pane-tab").forEach(btn => {
+        if (btn.dataset.pane === tab) {
+          btn.className = "pane-tab flex-1 py-1.5 px-2 border border-[var(--border)] font-bold bg-[var(--foreground)] text-[var(--background)] cursor-pointer";
+        } else {
+          btn.className = "pane-tab flex-1 py-1.5 px-2 border border-[var(--border)] font-bold bg-[var(--background)] text-[var(--foreground)] cursor-pointer";
+        }
+      });
+      applyAdaptiveLayout();
+    }
+
+    window.addEventListener("resize", applyAdaptiveLayout);
+    document.getElementById("split-tab-02").onclick = () => setSplitRightTab("02");
+    document.getElementById("split-tab-03").onclick = () => setSplitRightTab("03");
+    document.querySelectorAll(".pane-tab").forEach(btn => {
+      btn.onclick = () => setMobileTab(btn.dataset.pane);
+    });
+
+    // Mode A / Mode B Switcher
+    const btnModeDb = document.getElementById("btn-mode-db");
+    const btnModeManual = document.getElementById("btn-mode-manual");
+    const panelModeDb = document.getElementById("panel-mode-db");
+    const panelModeManual = document.getElementById("panel-mode-manual");
+
+    btnModeDb.onclick = () => {
+      activeClassifyMode = "db";
+      btnModeDb.className = "py-1.5 px-2 border border-[var(--border)] font-bold bg-[var(--foreground)] text-[var(--background)] cursor-pointer text-left flex items-center justify-between";
+      btnModeManual.className = "py-1.5 px-2 border border-[var(--border)] font-bold bg-[var(--card)] text-[var(--foreground)] hover:bg-[var(--sidebar)] cursor-pointer text-left flex items-center justify-between";
+      panelModeDb.classList.remove("hidden");
+      panelModeDb.classList.add("flex");
+      panelModeManual.classList.add("hidden");
+      panelModeManual.classList.remove("flex");
+      telemetryLog.textContent = `[MODE A ACTIVATED] 网易云客户端 SQLite 本地数据库探测模式。`;
+    };
+
+    btnModeManual.onclick = () => {
+      activeClassifyMode = "manual";
+      btnModeManual.className = "py-1.5 px-2 border border-[var(--border)] font-bold bg-[var(--foreground)] text-[var(--background)] cursor-pointer text-left flex items-center justify-between";
+      btnModeDb.className = "py-1.5 px-2 border border-[var(--border)] font-bold bg-[var(--card)] text-[var(--foreground)] hover:bg-[var(--sidebar)] cursor-pointer text-left flex items-center justify-between";
+      panelModeManual.classList.remove("hidden");
+      panelModeManual.classList.add("flex");
+      panelModeDb.classList.add("hidden");
+      panelModeDb.classList.remove("flex");
+      telemetryLog.textContent = `[MODE B ACTIVATED] 手动编排模式：勾选歌曲并移入自定义歌单/专辑。`;
+    };
+
+    // Move to target
+    document.getElementById("btn-move-to-dest").onclick = () => {
+      const destSelect = document.getElementById("select-target-dest");
+      const targetVal = destSelect.value;
+      const targetText = destSelect.options[destSelect.selectedIndex].text.replace("目标: ", "");
+      const isAlbum = targetVal.startsWith("alb_");
+
+      let count = 0;
+      tracks.forEach(t => {
+        if (checkedTrackIds.has(t.id)) {
+          t.targetFolder = targetText;
+          t.collectionType = isAlbum ? "album" : "playlist";
+          t.collectionName = targetText.split("/")[1] || targetText;
+          count++;
+        }
+      });
+
+      if (count === 0) {
+        telemetryLog.textContent = `[TIP] 请先在左侧表格中勾选需要移动的曲目。`;
+        return;
+      }
+
+      telemetryLog.textContent = `[CLASSIFIED] 已将 ${count} 首曲目手动移入分类：${targetText}`;
+      renderQueue();
+      renderInspector();
+      renderDirectoryTree();
+    };
+
+    // Mode A: Apply DB Classification
+    document.getElementById("btn-apply-db-classify").onclick = () => {
+      const sel = document.getElementById("select-db-collection");
+      const val = sel.value;
+      if (val === "blonde") {
+        tracks.forEach((t, i) => {
+          t.collectionType = "album";
+          t.collectionName = "Blonde";
+          t.targetFolder = "Albums/Blonde";
+          t.seq = String(i + 1).padStart(2, "0");
+        });
+        telemetryLog.textContent = `[DB AUTO-CLASSIFY] 识别并匹配网易云专辑《Blonde》(10 首)，曲目顺序 01..10 自动排列。`;
+      } else if (val === "ram") {
+        tracks.forEach((t, i) => {
+          t.collectionType = "album";
+          t.collectionName = "Random Access Memories";
+          t.targetFolder = "Albums/Random Access Memories";
+          t.seq = String(i + 1).padStart(2, "0");
+        });
+        telemetryLog.textContent = `[DB AUTO-CLASSIFY] 识别并匹配网易云专辑《Random Access Memories》。`;
+      } else {
+        tracks.forEach((t, i) => {
+          t.collectionType = "playlist";
+          t.collectionName = "我喜欢的音乐";
+          t.targetFolder = "Playlists/我喜欢的音乐";
+          t.seq = String(i + 1).padStart(2, "0");
+        });
+        telemetryLog.textContent = `[DB AUTO-CLASSIFY] 识别并匹配网易云歌单《我喜欢的音乐》。`;
+      }
+      renderQueue();
+      renderInspector();
+      renderDirectoryTree();
+    };
+
+    // Move Up / Move Down
+    document.getElementById("btn-move-up").onclick = () => {
+      const idx = tracks.findIndex(x => x.id === selectedId);
+      if (idx > 0) {
+        const temp = tracks[idx];
+        tracks[idx] = tracks[idx - 1];
+        tracks[idx - 1] = temp;
+        tracks.forEach((t, i) => { t.seq = String(i + 1).padStart(2, "0"); });
+        renderQueue();
+        renderInspector();
+        renderDirectoryTree();
+        telemetryLog.textContent = `[REORDER] 曲目上移：${temp.seq} ${temp.title}`;
+      }
+    };
+
+    document.getElementById("btn-move-down").onclick = () => {
+      const idx = tracks.findIndex(x => x.id === selectedId);
+      if (idx >= 0 && idx < tracks.length - 1) {
+        const temp = tracks[idx];
+        tracks[idx] = tracks[idx + 1];
+        tracks[idx + 1] = temp;
+        tracks.forEach((t, i) => { t.seq = String(i + 1).padStart(2, "0"); });
+        renderQueue();
+        renderInspector();
+        renderDirectoryTree();
+        telemetryLog.textContent = `[REORDER] 曲目下移：${temp.seq} ${temp.title}`;
+      }
+    };
+
+    // Select All Checkbox
+    document.getElementById("check-select-all").onchange = (e) => {
+      if (e.target.checked) {
+        tracks.forEach(t => checkedTrackIds.add(t.id));
+      } else {
+        checkedTrackIds.clear();
+      }
+      renderQueue();
+    };
+
+    function renderQueue() {
+      tbody.innerHTML = "";
+      const filtered = tracks.filter(t => {
+        if (activeFilter === "issues") return t.status !== "COMPLIANT";
+        if (activeFilter === "ok") return t.status === "COMPLIANT";
+        return true;
+      });
+
+      filtered.forEach(t => {
+        const tr = document.createElement("tr");
+        const isSelected = t.id === selectedId;
+        const isChecked = checkedTrackIds.has(t.id);
+
+        tr.className = `cursor-pointer transition-colors ${
+          isSelected ? "bg-[var(--background)] font-bold" : "hover:bg-[var(--background)]/60"
+        }`;
+
+        const blockBadge = t.blockSize > 4096
+          ? `<span class="text-[#FF3300] font-bold">${t.blockSize}!</span>`
+          : `<span class="text-emerald-600">${t.blockSize}</span>`;
+
+        const covBadge = (t.coverRes !== "500×500" || t.coverYuv !== "4:2:0")
+          ? `<span class="text-[#FF3300] font-bold">${t.coverRes.split("×")[0]}p</span>`
+          : `<span class="text-emerald-600">500p</span>`;
+
+        const stateBadge = t.status === "COMPLIANT"
+          ? `<span class="px-1.5 py-0.5 bg-emerald-600 text-white font-bold">OK</span>`
+          : `<span class="px-1.5 py-0.5 bg-[#FF3300] text-white font-bold">FIX</span>`;
+
+        tr.innerHTML = `
+          <td class="py-2 px-2 text-center" onclick="event.stopPropagation()">
+            <input type="checkbox" class="track-check swiss-check" data-id="${t.id}" ${isChecked ? "checked" : ""} />
+          </td>
+          <th scope="row" class="py-2 px-2 font-semibold text-left whitespace-nowrap">
+            <span class="inline-block w-1.5 h-1.5 mr-1 ${isSelected ? "bg-[#FF3300]" : "bg-transparent"}"></span>
+            ${t.seq} ${t.title}
+          </th>
+          <td class="py-2 px-2 truncate max-w-[120px]">
+            <span class="px-1 py-0.5 border border-[var(--border)] bg-[var(--background)] text-xs">${t.targetFolder}</span>
+          </td>
+          <td class="py-2 px-2 col-secondary">${blockBadge}</td>
+          <td class="py-2 px-2 col-secondary">${covBadge}</td>
+          <td class="py-2 px-3 text-right">${stateBadge}</td>
+        `;
+
+        tr.onclick = () => {
+          selectedId = t.id;
+          if (window.innerWidth >= 768 && window.innerWidth < 1180) {
+            setSplitRightTab("02");
+          } else if (window.innerWidth < 768) {
+            setMobileTab("02");
+          }
+          renderQueue();
+          renderInspector();
+        };
+
+        tbody.appendChild(tr);
+      });
+
+      document.querySelectorAll(".track-check").forEach(chk => {
+        chk.onchange = (e) => {
+          const id = parseInt(e.target.dataset.id);
+          if (e.target.checked) checkedTrackIds.add(id);
+          else checkedTrackIds.delete(id);
+          document.getElementById("check-select-all").checked = (checkedTrackIds.size === tracks.length);
+        };
+      });
+
+      const issuesCount = tracks.filter(t => t.status !== "COMPLIANT").length;
+      const okCount = tracks.length - issuesCount;
+      document.getElementById("queue-counter").textContent = `${tracks.length} TRACKS`;
+
+      const summaryBadge = document.getElementById("summary-issues-badge");
+      if (issuesCount === 0) {
+        summaryBadge.textContent = "100% COMPLIANT";
+        summaryBadge.className = "px-2 py-0.5 bg-emerald-600 text-white font-bold shrink-0";
+      } else {
+        summaryBadge.textContent = `${issuesCount} NON-COMPLIANT`;
+        summaryBadge.className = "px-2 py-0.5 bg-[#FF3300] text-white font-bold shrink-0";
+      }
+
+      document.querySelectorAll(".filter-btn").forEach(btn => {
+        const f = btn.dataset.filter;
+        if (f === "all") btn.textContent = `ALL (${tracks.length})`;
+        if (f === "issues") btn.textContent = `待规范 (${issuesCount})`;
+        if (f === "ok") btn.textContent = `已合规 (${okCount})`;
+      });
+
+      const pct = Math.round((okCount / tracks.length) * 100);
+      document.getElementById("global-progress-bar").style.width = `${pct}%`;
+      document.getElementById("global-progress-bar").className =
+        okCount === tracks.length
+          ? "bg-emerald-600 h-full transition-all duration-300"
+          : "bg-[#FF3300] h-full transition-all duration-300";
+      document.getElementById("global-progress-text").textContent = `${okCount}/${tracks.length} OK`;
+    }
+
+    function renderInspector() {
+      const t = tracks.find(x => x.id === selectedId) || tracks[0];
+      document.getElementById("inspector-track-id").textContent = `TRACK #${t.seq}`;
+      document.getElementById("insp-source-file").textContent = `SOURCE: ${t.artist} - ${t.title}${t.srcExt}`;
+      document.getElementById("insp-title").textContent = `${t.seq} ${t.artist} - ${t.title}.flac`;
+      document.getElementById("insp-dest").textContent = `Target: ${t.targetFolder}/${t.seq} ${t.artist} - ${t.title}.flac`;
+
+      document.getElementById("cover-dim-label").textContent = `${t.coverRes} • ${t.coverYuv}`;
+      document.getElementById("cover-badge-type").textContent = `TYPE ${t.coverType}`;
+
+      const tagsContainer = document.getElementById("insp-tags");
+      tagsContainer.innerHTML = `
+        <span class="px-1.5 py-0.5 border border-[var(--border)] bg-[var(--background)]">${t.pcm}</span>
+        <span class="px-1.5 py-0.5 border border-[var(--border)] bg-[var(--background)]">UTF-8 CRLF</span>
+        <span class="px-1.5 py-0.5 border border-[var(--border)] bg-[var(--background)]">${(t.sizeBytes / 1024 / 1024).toFixed(1)} MB</span>
+      `;
+
+      document.getElementById("diag-pcm").textContent = t.pcm;
+      const diagAudioBadge = document.getElementById("diag-audio-badge");
+      const diagBlockCur = document.getElementById("diag-block-cur");
+      if (t.blockSize > 4096 || t.srcExt === ".ncm") {
+        diagAudioBadge.textContent = t.srcExt === ".ncm" ? "DECRYPT + REFRAME" : "REFRAME REQUIRED";
+        diagAudioBadge.className = "swiss-mono text-xs px-1.5 py-0.5 font-bold bg-[#FF3300] text-white";
+        diagBlockCur.textContent = `${t.blockSize} (ERR)`;
+        diagBlockCur.className = "font-bold text-[#FF3300] mt-0.5";
+      } else {
+        diagAudioBadge.textContent = "COMPLIANT (≤4096)";
+        diagAudioBadge.className = "swiss-mono text-xs px-1.5 py-0.5 font-bold bg-emerald-600 text-white";
+        diagBlockCur.textContent = "4096 (OK)";
+        diagBlockCur.className = "font-bold text-emerald-600 mt-0.5";
+      }
+
+      const diagCoverBadge = document.getElementById("diag-cover-badge");
+      const diagCovRes = document.getElementById("diag-cov-res");
+      const diagCovYuv = document.getElementById("diag-cov-yuv");
+      if (t.coverRes !== "500×500" || t.coverYuv !== "4:2:0" || t.coverType !== 3) {
+        diagCoverBadge.textContent = "NORMALIZE 500p/420";
+        diagCoverBadge.className = "swiss-mono text-xs px-1.5 py-0.5 font-bold bg-[#FF3300] text-white";
+        diagCovRes.textContent = `${t.coverRes.split("×")[0]} → 500px`;
+        diagCovYuv.textContent = `YUV ${t.coverYuv} → 4:2:0`;
+        diagCovYuv.className = "font-bold text-[#FF3300] mt-0.5";
+      } else {
+        diagCoverBadge.textContent = "COMPLIANT JPEG";
+        diagCoverBadge.className = "swiss-mono text-xs px-1.5 py-0.5 font-bold bg-emerald-600 text-white";
+        diagCovRes.textContent = "500×500 (OK)";
+        diagCovYuv.textContent = "4:2:0 (OK)";
+        diagCovYuv.className = "font-bold text-emerald-600 mt-0.5";
+      }
+
+      const lrcBox = document.getElementById("lrc-preview-box");
+      lrcBox.textContent = lrcViewMode === "raw" ? t.rawLrc : t.cleanLrc;
+
+      const singleBtn = document.getElementById("btn-fix-single");
+      const singleHint = document.getElementById("single-track-hint");
+      if (t.status === "COMPLIANT") {
+        singleHint.textContent = "STATUS: 100% HARDWARE COMPLIANT";
+        singleBtn.textContent = "✓ COMPLIANT";
+        singleBtn.disabled = true;
+        singleBtn.className = "swiss-mono text-xs font-bold px-3 py-1 border border-[var(--border)] text-[var(--muted-foreground)] cursor-not-allowed shrink-0";
+      } else {
+        singleHint.textContent = "STATUS: PENDING NORMALIZATION";
+        singleBtn.textContent = "NORMALIZE TRACK →";
+        singleBtn.disabled = false;
+        singleBtn.className = "swiss-mono text-xs font-bold px-3 py-1 border border-[var(--foreground)] hover:bg-[var(--foreground)] hover:text-[var(--background)] transition-colors cursor-pointer shrink-0";
+      }
+    }
+
+    function normalizeTrackObject(t) {
+      t.srcExt = ".flac";
+      t.blockSize = 4096;
+      t.coverRes = "500×500";
+      t.coverYuv = "4:2:0";
+      t.coverType = 3;
+      t.lrcState = "CLEAN";
+      t.rawLrc = t.cleanLrc;
+      t.status = "COMPLIANT";
+    }
+
+    document.getElementById("btn-fix-single").onclick = () => {
+      const t = tracks.find(x => x.id === selectedId);
+      if (!t || t.status === "COMPLIANT") return;
+      normalizeTrackObject(t);
+      telemetryLog.textContent = `[NORMALIZED] ${t.seq} ${t.artist} - ${t.title}.flac (BlockSize=4096, Cover=500x500 YUV420p, LRC cleaned).`;
+      renderQueue();
+      renderInspector();
+      renderDirectoryTree();
+    };
+
+    // Master Build Button: Generates Local Library
+    document.getElementById("btn-build-library").onclick = async () => {
+      if (isBuilding) return;
+      isBuilding = true;
+      const btn = document.getElementById("btn-build-library");
+      const libPath = document.getElementById("lib-path-input").value.trim();
+      btn.className = "w-full py-2.5 px-4 bg-[var(--foreground)] text-[var(--background)] font-bold swiss-mono text-xs tracking-wider uppercase flex items-center justify-between cursor-wait";
+
+      for (let i = 0; i < tracks.length; i++) {
+        const t = tracks[i];
+        selectedId = t.id;
+        if (t.status !== "COMPLIANT") {
+          telemetryLog.textContent = `[TRANSCODING & CLASSIFYING ${i + 1}/${tracks.length}] ${t.title} -> ${t.targetFolder}/ (BlockSize→4096, Cover→500px 4:2:0)...`;
+          renderQueue();
+          renderInspector();
+          await new Promise(r => setTimeout(r, 220));
+          normalizeTrackObject(t);
+          renderQueue();
+          renderInspector();
+          renderDirectoryTree();
+        }
+      }
+
+      telemetryLog.textContent = `[WRITING REGISTRY] Writing echo_library.json at ${libPath}...`;
+      await new Promise(r => setTimeout(r, 300));
+
+      const statusBadge = document.getElementById("library-status-badge");
+      statusBadge.textContent = "BUILT & READY";
+      statusBadge.className = "swiss-mono text-xs font-bold text-emerald-600";
+
+      btn.className = "w-full py-2.5 px-4 bg-emerald-600 text-white font-bold swiss-mono text-xs tracking-wider uppercase flex items-center justify-between cursor-pointer";
+      btn.innerHTML = `<span>✓ LOCAL LIBRARY BUILT (${tracks.length} TRACKS)</span><span>100%</span>`;
+
+      telemetryLog.textContent = `[SUCCESS] 本地乐库构建完成！已分类存放至 ${libPath}。请手动拷贝至 TF 卡。`;
+      isBuilding = false;
+    };
+
+    // Optional TF Card Utilities
+    document.getElementById("btn-fat-sort").onclick = () => {
+      telemetryLog.textContent = `[TF UTILITY] 提示：在插入 TF 卡后，对 /Volumes/NO NAME/ 执行物理扇区重写，即可保证播放器按 01..N 严格顺序浏览。`;
+    };
+
+    document.getElementById("btn-dot-clean").onclick = () => {
+      telemetryLog.textContent = `[TF UTILITY] 提示：拷贝完成后执行 /usr/sbin/dot_clean -m，将彻底清除 macOS 遗留在 TF 卡的 ._* 幽灵文件。`;
+    };
+
+    document.getElementById("btn-theme-toggle").onclick = () => {
+      const root = document.documentElement;
+      root.classList.toggle("dark");
+      root.classList.toggle("light");
+    };
+
+    document.getElementById("btn-reset-demo").onclick = () => {
+      tracks = JSON.parse(JSON.stringify(INITIAL_TRACKS));
+      selectedId = 1;
+      checkedTrackIds.clear();
+      document.getElementById("check-select-all").checked = false;
+      isBuilding = false;
+      const btn = document.getElementById("btn-build-library");
+      btn.className = "w-full py-2.5 px-4 bg-[#FF3300] hover:bg-[#e02d00] text-white font-bold swiss-mono text-xs tracking-wider uppercase flex items-center justify-between cursor-pointer transition-colors";
+      btn.innerHTML = `<span>BUILD LOCAL LIBRARY</span><span>→</span>`;
+      const statusBadge = document.getElementById("library-status-badge");
+      statusBadge.textContent = "STAGING";
+      statusBadge.className = "swiss-mono text-xs font-bold text-amber-600";
+      telemetryLog.textContent = `[RESET] Demo state reset. Ready for NetEase DB or Manual Classification.`;
+      renderQueue();
+      renderInspector();
+      renderDirectoryTree();
+    };
+
+    const btnRaw = document.getElementById("btn-lrc-raw");
+    const btnClean = document.getElementById("btn-lrc-clean");
+    btnRaw.onclick = () => {
+      lrcViewMode = "raw";
+      btnRaw.className = "px-1.5 py-0.5 border border-[var(--border)] bg-[var(--foreground)] text-[var(--background)] font-bold cursor-pointer";
+      btnClean.className = "px-1.5 py-0.5 border border-[var(--border)] bg-[var(--background)] cursor-pointer";
+      renderInspector();
+    };
+    btnClean.onclick = () => {
+      lrcViewMode = "clean";
+      btnClean.className = "px-1.5 py-0.5 border border-[var(--border)] bg-[var(--foreground)] text-[var(--background)] font-bold cursor-pointer";
+      btnRaw.className = "px-1.5 py-0.5 border border-[var(--border)] bg-[var(--background)] cursor-pointer";
+      renderInspector();
+    };
+
+    document.querySelectorAll(".filter-btn").forEach(btn => {
+      btn.onclick = () => {
+        activeFilter = btn.dataset.filter;
+        document.querySelectorAll(".filter-btn").forEach(b => {
+          b.className = "filter-btn text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer";
+        });
+        btn.className = "filter-btn font-bold underline decoration-[#FF3300] decoration-2 underline-offset-4 cursor-pointer";
+        renderQueue();
+      };
+    });
+
+    renderQueue();
+    renderInspector();
+    renderDirectoryTree();
+    applyAdaptiveLayout();
+  </script>
+</body>
+</html>

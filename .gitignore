@@ -1,6 +1,8 @@
 # Target & Build
 target/
 dist/
+dist_app/
+build/
 node_modules/
 
 # OS & Editor
@@ -12,4 +14,8 @@ node_modules/
 # Python / Temp
 __pycache__/
 *.pyc
+*.spec.bak
 .env
+*.tsbuildinfo
+engine/bin/
+

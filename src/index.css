@@ -1,0 +1,134 @@
+@import "tailwindcss";
+
+@layer base {
+  :root, html.light {
+    color-scheme: light;
+    --background: #F4F4F0;
+    --card: #FAF9F5;
+    --sidebar: #EAE9E4;
+    --foreground: #111111;
+    --muted-foreground: #686863;
+    --border: #111111;
+    --active-bg: #111111;
+    --active-fg: #F4F4F0;
+    --active-border: #111111;
+    --badge-bg: #111111;
+    --badge-fg: #F4F4F0;
+  }
+
+  html.dark {
+    color-scheme: dark;
+    --background: #111111;
+    --card: #181818;
+    --sidebar: #202020;
+    --foreground: #F4F4F0;
+    --muted-foreground: #9A9A95;
+    --border: #383838;
+    --active-bg: #2C2C2C;
+    --active-fg: #FFFFFF;
+    --active-border: #FF3300;
+    --badge-bg: #282828;
+    --badge-fg: #FFFFFF;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Inter", "PingFang SC", sans-serif;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+
+  select, input, textarea {
+    color-scheme: inherit;
+    color: var(--foreground);
+  }
+
+  select option {
+    background-color: var(--card);
+    color: var(--foreground);
+  }
+}
+
+.swiss-mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.swiss-border-r { border-right: 1px solid var(--border); }
+.swiss-border-l { border-left: 1px solid var(--border); }
+.swiss-border-b { border-bottom: 1px solid var(--border); }
+.swiss-border-t { border-top: 1px solid var(--border); }
+
+.table-wrapper {
+  overflow-y: auto;
+  overflow-x: auto;
+  max-inline-size: 100%;
+  container-type: inline-size;
+  scrollbar-gutter: stable;
+}
+
+.table-wrapper table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+
+.table-wrapper thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+}
+
+.table-wrapper tbody th {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background-color: inherit;
+}
+
+@container (width < 450px) {
+  .table-wrapper .col-secondary {
+    display: none;
+  }
+}
+
+.swiss-check {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--border);
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+  background-color: var(--card);
+  flex-shrink: 0;
+}
+
+.swiss-check::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  transform: scale(0);
+  background-color: #FF3300;
+  transition: 80ms transform ease-in-out;
+}
+
+.swiss-check:checked::before {
+  transform: scale(1);
+}
+
+.workbench-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.panel-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 0%;
+}
