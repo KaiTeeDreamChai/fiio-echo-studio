@@ -6,7 +6,7 @@
 [![Platform](https://img.shields.io/badge/PLATFORM-macOS%20ARM64-000000.svg?style=flat-square&logo=apple)](https://github.com/KaiTeeDreamChai/fiio-echo-studio)
 [![UI Design](https://img.shields.io/badge/UI-SWISS%20INTERNATIONAL-FF3300.svg?style=flat-square)](https://github.com/KaiTeeDreamChai/fiio-echo-studio)
 [![Codec Compliance](https://img.shields.io/badge/FLAC-BLOCKSIZE%20%E2%89%A4%204096-000000.svg?style=flat-square)](https://github.com/KaiTeeDreamChai/fiio-echo-studio)
-[![Tests](https://img.shields.io/badge/TESTS-17%20PASSED-000000.svg?style=flat-square)](engine/tests/test_core.py)
+[![Tests](https://img.shields.io/badge/TESTS-19%20PASSED-000000.svg?style=flat-square)](engine/tests/test_core.py)
 [![License](https://img.shields.io/badge/LICENSE-WTFPL-FF3300.svg?style=flat-square)](LICENSE)
 
 </div>
@@ -50,6 +50,8 @@
 > **关于第 05 项**：FAT32 目录项由文件系统驱动分配，重建后仍可能被驱动重排，因此这里提供的是"尽力而为"的物理顺序重建，而不是硬件级保证。此前版本该按钮只做统计却回报成功，现已改为真实搬移并回报处理数量。
 
 ### 额外保障
+* **原生 macOS 菜单栏**：文件（⌘R 重新探测、⌘B 构建、⌘O 选择输出目录）、编辑、视图（⌘T 切换主题、⌘⇧R 重载）、窗口、帮助；菜单项通过事件与界面联动，不是摆设。
+* **本机数据源自动识别**：启动时扫描网易云客户端的多个可能位置（Application Support / Containers），按数据库大小与表结构选出真实库；下载目录不写死，而是用 `offlineTrack` 里的真实文件名去候选目录命中打分，命中率最高的即真实下载目录。可用 `NETEASE_DB_PATH`、`NETEASE_DOWNLOAD_DIR` 环境变量覆盖。
 * **FAT32 文件名净化**：`\ / : * ? " < > |` 与 DOS 保留名、超长名称都会被安全替换/截断，避免"在 Mac 上能生成、拷进 SD 卡就报错"。
 * **构建任务化**：大库构建在后台线程执行，界面实时显示 `已完成/总数`、当前曲目，并支持中途取消。
 * **本地接口防越权**：仅允许 `127.0.0.1` / `localhost` 的 `Host` 与 `Origin` 访问，任意网页无法调用写文件接口。
@@ -59,7 +61,8 @@
 ## 03 // WORKBENCH ARCHITECTURE (工作台架构)
 
 ### 三栏工作台功能设计
-* **COL 01: 乐库与队列检视**：网易云本地专辑/歌单双模态、歌单筛选（可选）、已下载感知、真实帧大小/封面列、自定义目标目录归档与物理上下排序。
+* **来源侧栏**：网易云本地专辑/歌单双模态、**模糊搜索**（专辑名/歌手、歌单名/作者）、**我创建 / 我收藏**切换、作者/歌手模糊筛选、重新探测、导入、手动创建分类。
+* **COL 01: 乐库与队列检视**：已下载感知、真实帧大小/封面列、自定义目标目录归档与物理上下排序。
 * **COL 02: 硬件规范深度透视**：真实 PCM 参数、帧大小合规判定、封面真实分辨率/色度抽样与不合规原因、LRC 清洗前后对照。
 * **COL 03: 规范构建与输出**：目标路径挂载、后台任务进度与取消、构建统计、FAT32 目录项重建与 macOS 幽灵文件净化。
 
@@ -73,8 +76,13 @@
 
 ## 04 // INSTALLATION & DOWNLOAD
 
-### 方式 A: 预编译安装包
-当前仓库**尚未发布 Release 产物**，[Releases](../../releases) 页面在有构建产物后会出现 `FiiO_Echo_Studio_v1.1.0_arm64.dmg`。
+### 方式 A: 预编译安装包（推荐）
+
+1. 前往 [Releases](../../releases) 下载最新版：
+   * `FiiO_Echo_Studio_v1.2.0_arm64.dmg`（macOS Apple Silicon）
+2. 双击打开 DMG，将 **FiiO Echo Studio** 拖入 **Applications**。
+3. 首次启动无需安装任何依赖（`ffmpeg`、`ncmdump` 与 Python 运行时均已内置）。
+4. 应用为 ad-hoc 签名、未做 Apple 公证；若 Gatekeeper 拦截，请右键 App → **打开**。
 
 ### 方式 B: 从源码运行与开发构建
 
@@ -100,7 +108,7 @@ chmod +x build_app.sh
 
 构建产物：
 * `dist_app/FiiO Echo Studio.app`
-* `dist_app/FiiO_Echo_Studio_v1.1.0_arm64.dmg`
+* `dist_app/FiiO_Echo_Studio_v1.2.0_arm64.dmg`
 
 > `engine/bin/` 中的 `ffmpeg`、`ncmdump` 不入库。`build_app.sh` 会自动尝试从 `node_modules/ffmpeg-static`、`PATH` 或 Homebrew 补齐，缺失时给出明确指引。
 

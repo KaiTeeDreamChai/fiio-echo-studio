@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from engine.core.builder import LibraryBuilder
 from engine.core.inspector import AudioInspector
@@ -63,6 +64,71 @@ class NamingTests(unittest.TestCase):
         self.assertEqual(make_unique("01 A - B", used), "01 A - B")
         self.assertEqual(make_unique("01 A - B", used), "01 A - B (2)")
 
+
+class SourceDetectionTests(unittest.TestCase):
+    """Import paths must come from the machine, never from hardcoded values."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.download_dir = os.path.join(self.temp_dir, "网易云音乐")
+        os.makedirs(os.path.join(self.download_dir, "meta"))
+        for name in ("Artist A - Song One.ncm", "Artist B - Song Two.flac"):
+            with open(os.path.join(self.download_dir, name), "wb") as handle:
+                handle.write(b"x")
+
+        self.db_path = os.path.join(self.temp_dir, "sqlite_storage.sqlite3")
+        connection = sqlite3.connect(self.db_path)
+        cursor = connection.cursor()
+        cursor.execute(
+            "CREATE TABLE offlineTrack (id TEXT, trackName TEXT, artistName TEXT,"
+            " albumName TEXT, newRelativePath TEXT, size INTEGER, jsonStr TEXT);"
+        )
+        cursor.execute(
+            "INSERT INTO offlineTrack VALUES ('1','Song One','Artist A','Album',"
+            "'Artist A - Song One.ncm',1,NULL);"
+        )
+        cursor.execute(
+            "INSERT INTO offlineTrack VALUES ('2','Song Two','Artist B','Album',"
+            "'Artist B - Song Two.flac',1,NULL);"
+        )
+        cursor.execute("CREATE TABLE requestCache (id TEXT, jsonStr TEXT);")
+        connection.commit()
+        connection.close()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_database_and_download_dir_are_discovered(self):
+        with patch.dict(
+            os.environ,
+            {"NETEASE_DB_PATH": self.db_path, "NETEASE_DOWNLOAD_DIR": self.download_dir},
+        ):
+            provider = NetEaseDBProvider()
+
+        self.assertEqual(provider.db_path, self.db_path)
+        self.assertEqual(provider.detection["db_source"], "env")
+        self.assertEqual(provider.download_dir, self.download_dir)
+        self.assertGreaterEqual(provider.detection["download_matched"], 1)
+        self.assertEqual(provider.detection["download_sample_size"], 2)
+
+        with patch.dict(
+            os.environ,
+            {"NETEASE_DB_PATH": self.db_path, "NETEASE_DOWNLOAD_DIR": self.download_dir},
+        ):
+            report = provider.refresh_detection()
+        self.assertEqual(report["db_path"], self.db_path)
+        self.assertEqual(report["download_dir"], self.download_dir)
+
+    def test_missing_env_paths_fall_back_without_crashing(self):
+        with patch.dict(
+            os.environ,
+            {"NETEASE_DB_PATH": "/nonexistent/db.sqlite3", "NETEASE_DOWNLOAD_DIR": "/nonexistent/dir"},
+            clear=False,
+        ):
+            provider = NetEaseDBProvider()
+        # Falls back to scanning; the key contract is that it never raises.
+        self.assertIsInstance(provider.detection, dict)
+        self.assertIn("db_path", provider.detection)
 
 class LrcSanitizerTests(unittest.TestCase):
     def setUp(self):

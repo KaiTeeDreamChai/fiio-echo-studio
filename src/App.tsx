@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { SwissHeader } from './components/SwissHeader';
+import { DesktopHeader } from './components/DesktopHeader';
+import { SourceSidebar } from './components/SourceSidebar';
+import { BuildBar } from './components/BuildBar';
 import { QueuePanel } from './components/QueuePanel';
 import { InspectorPanel } from './components/InspectorPanel';
 import { LocalLibraryPanel } from './components/LocalLibraryPanel';
@@ -137,6 +140,12 @@ export const App: React.FC = () => {
   const [onlyMine, setOnlyMine] = useState<boolean>(false);
   const [isLoadingDb, setIsLoadingDb] = useState<boolean>(false);
   const [customFolders, setCustomFolders] = useState<string[]>([]);
+  const [sourceInfo, setSourceInfo] = useState<{
+    dbPath: string | null;
+    downloadDir: string;
+    matched: number;
+    sample: number;
+  } | null>(null);
 
   const bootstrapped = useRef<boolean>(false);
 
@@ -153,21 +162,38 @@ export const App: React.FC = () => {
   const loadDbMetadata = async (): Promise<void> => {
     setIsLoadingDb(true);
     try {
+      // Re-scan this machine for the NetEase DB + download folder instead of
+      // assuming a fixed path; the backend scores candidates against real files.
+      let matchSummary = '';
+      try {
+        const reloaded = await StudioApi.reloadSources();
+        if (reloaded.success) {
+          setSourceInfo({
+            dbPath: reloaded.db_path ?? null,
+            downloadDir: reloaded.download_dir ?? '',
+            matched: reloaded.detection?.download_matched ?? 0,
+            sample: reloaded.detection?.download_sample_size ?? 0,
+          });
+          if (reloaded.detection?.download_sample_size) {
+            matchSummary = ` · 本地文件匹配 ${reloaded.detection.download_matched}/${reloaded.detection.download_sample_size}`;
+          }
+        }
+      } catch {
+        // discovery endpoint is optional for older engines
+      }
+
       const [albumRes, plRes] = await Promise.all([
         StudioApi.getAlbums(),
-        StudioApi.getPlaylists(preferredCreator, onlyMine),
+        StudioApi.getPlaylists(),
       ]);
       const albums = albumRes.albums ?? [];
       setAvailableAlbums(albums);
       setAvailablePlaylists(plRes.playlists ?? []);
 
-      const filterSummary = preferredCreator.trim()
-        ? ` (筛选作者: ${preferredCreator}${onlyMine ? '，仅看TA' : ''})`
-        : '';
       setLogMessage(
         `[DB SYNCED] 识别到 ${albumRes.count ?? albums.length} 张已下载专辑，${
           plRes.count ?? 0
-        } 个歌单${filterSummary}。`,
+        } 个歌单${matchSummary}。`,
       );
 
       if (!bootstrapped.current && albums.length > 0) {
@@ -184,10 +210,10 @@ export const App: React.FC = () => {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadDbMetadata();
-    }, 300); // debounce creator typing
+    }, 300);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preferredCreator, onlyMine]);
+  }, []);
 
   const selectedTrack = tracks.find((track) => track.id === selectedId) ?? tracks[0];
   const okCount = tracks.filter((track) => track.status === 'COMPLIANT').length;
@@ -603,20 +629,98 @@ export const App: React.FC = () => {
     }
   };
 
+  // ------------------------------------------------------- native macOS menu
+  const menuHandlersRef = useRef<Record<string, () => void>>({});
+  menuHandlersRef.current = {
+    rescan: () => {
+      void loadDbMetadata();
+    },
+    build: () => {
+      void handleBuildLibrary();
+    },
+    theme: handleThemeToggle,
+    'choose-root': () => {
+      void handleBrowseFolder();
+    },
+    reload: () => window.location.reload(),
+  };
+
+  useEffect(() => {
+    const onMenuAction = (event: Event) => {
+      const action = String((event as CustomEvent).detail ?? '');
+      menuHandlersRef.current[action]?.();
+    };
+    window.addEventListener('fiio:menu', onMenuAction as EventListener);
+    return () => window.removeEventListener('fiio:menu', onMenuAction as EventListener);
+  }, []);
+
   // ---------------------------------------------------------------------- view
+  const isDesktop = layoutTier === 'TIER_1_DESKTOP';
+
+  const queueView = (hideSource: boolean) => (
+    <QueuePanel
+      tracks={tracks}
+      selectedId={selectedId}
+      checkedIds={checkedIds}
+      activeFilter={activeFilter}
+      classifyMode={classifyMode}
+      availableAlbums={availableAlbums}
+      availablePlaylists={availablePlaylists}
+      preferredCreator={preferredCreator}
+      onlyMine={onlyMine}
+      isLoadingDb={isLoadingDb}
+      customFolders={customFolders}
+      hideSource={hideSource}
+      onSelectTrack={handleSelectTrack}
+      onToggleCheck={handleToggleCheck}
+      onToggleSelectAll={handleToggleSelectAll}
+      onFilterChange={setActiveFilter}
+      onClassifyModeChange={setClassifyMode}
+      onPreferredCreatorChange={setPreferredCreator}
+      onOnlyMineToggle={setOnlyMine}
+      onRefreshDb={loadDbMetadata}
+      onApplyDbAlbum={handleApplyDbAlbum}
+      onApplyDbPlaylist={handleApplyDbPlaylist}
+      onMoveToDest={handleMoveToDest}
+      onAddCustomFolder={handleAddCustomFolder}
+      onMoveUp={handleMoveUp}
+      onMoveDown={handleMoveDown}
+    />
+  );
+
+  const inspectorView = selectedTrack ? (
+    <InspectorPanel
+      track={selectedTrack}
+      isBuilding={isBuilding}
+      isNormalizing={normalizingId === selectedTrack.id}
+      onNormalizeTrack={handleNormalizeTrack}
+    />
+  ) : (
+    <section
+      id="col-02"
+      className="col-span-12 md:col-span-6 xl:col-span-4 swiss-border-r flex items-center justify-center text-xs swiss-mono text-[var(--muted-foreground)]"
+    >
+      请选择或导入专辑曲目以检视硬件规范
+    </section>
+  );
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden">
-      <SwissHeader
-        layoutTier={layoutTier}
-        windowWidth={windowDimensions.width}
-        windowHeight={windowDimensions.height}
-        libraryRoot={libraryRoot}
-        isBrowsing={isBrowsing}
-        onLibraryRootChange={setLibraryRoot}
-        onBrowseFolder={handleBrowseFolder}
-        onThemeToggle={handleThemeToggle}
-        onReset={handleReset}
-      />
+      {isDesktop ? (
+        <DesktopHeader onThemeToggle={handleThemeToggle} onReset={handleReset} />
+      ) : (
+        <SwissHeader
+          layoutTier={layoutTier}
+          windowWidth={windowDimensions.width}
+          windowHeight={windowDimensions.height}
+          libraryRoot={libraryRoot}
+          isBrowsing={isBrowsing}
+          onLibraryRootChange={setLibraryRoot}
+          onBrowseFolder={handleBrowseFolder}
+          onThemeToggle={handleThemeToggle}
+          onReset={handleReset}
+        />
+      )}
 
       {layoutTier !== 'TIER_1_DESKTOP' && (
         <nav className="swiss-border-b bg-[var(--card)] px-4 py-2 flex items-center justify-between shrink-0">
@@ -688,73 +792,63 @@ export const App: React.FC = () => {
         </nav>
       )}
 
-      <main className="workbench-grid bg-[var(--card)]">
-        {(layoutTier === 'TIER_1_DESKTOP' ||
-          layoutTier === 'TIER_2_SPLIT' ||
-          (layoutTier === 'TIER_3_MOBILE' && mobileTab === '01')) && (
-          <QueuePanel
-            tracks={tracks}
-            selectedId={selectedId}
-            checkedIds={checkedIds}
-            activeFilter={activeFilter}
-            classifyMode={classifyMode}
-            availableAlbums={availableAlbums}
-            availablePlaylists={availablePlaylists}
-            preferredCreator={preferredCreator}
-            onlyMine={onlyMine}
-            isLoadingDb={isLoadingDb}
-            customFolders={customFolders}
-            onSelectTrack={handleSelectTrack}
-            onToggleCheck={handleToggleCheck}
-            onToggleSelectAll={handleToggleSelectAll}
-            onFilterChange={setActiveFilter}
-            onClassifyModeChange={setClassifyMode}
-            onPreferredCreatorChange={setPreferredCreator}
-            onOnlyMineToggle={setOnlyMine}
-            onRefreshDb={loadDbMetadata}
-            onApplyDbAlbum={handleApplyDbAlbum}
-            onApplyDbPlaylist={handleApplyDbPlaylist}
-            onMoveToDest={handleMoveToDest}
-            onAddCustomFolder={handleAddCustomFolder}
-            onMoveUp={handleMoveUp}
-            onMoveDown={handleMoveDown}
-          />
-        )}
-
-        {(layoutTier === 'TIER_1_DESKTOP' ||
-          (layoutTier === 'TIER_2_SPLIT' && splitRightTab === '02') ||
-          (layoutTier === 'TIER_3_MOBILE' && mobileTab === '02')) &&
-          (selectedTrack ? (
-            <InspectorPanel
-              track={selectedTrack}
-              isBuilding={isBuilding}
-              isNormalizing={normalizingId === selectedTrack.id}
-              onNormalizeTrack={handleNormalizeTrack}
+      <main className={isDesktop ? 'desktop-main' : 'workbench-grid bg-[var(--card)]'}>
+        {isDesktop ? (
+          <>
+            <SourceSidebar
+              albums={availableAlbums}
+              playlists={availablePlaylists}
+              isLoading={isLoadingDb}
+              onRefresh={loadDbMetadata}
+              sourceInfo={sourceInfo}
+              onApplyAlbum={handleApplyDbAlbum}
+              onApplyPlaylist={handleApplyDbPlaylist}
+              onCreateFolder={handleAddCustomFolder}
             />
-          ) : (
-            <section
-              id="col-02"
-              className="col-span-12 md:col-span-6 xl:col-span-4 swiss-border-r flex items-center justify-center text-xs swiss-mono text-[var(--muted-foreground)]"
-            >
-              请选择或导入专辑曲目以检视硬件规范
-            </section>
-          ))}
+            <div className="desktop-pane">{queueView(true)}</div>
+            <div className="desktop-pane">{inspectorView}</div>
+          </>
+        ) : (
+          <>
+            {(layoutTier === 'TIER_2_SPLIT' ||
+              (layoutTier === 'TIER_3_MOBILE' && mobileTab === '01')) &&
+              queueView(false)}
 
-        {(layoutTier === 'TIER_1_DESKTOP' ||
-          (layoutTier === 'TIER_2_SPLIT' && splitRightTab === '03') ||
-          (layoutTier === 'TIER_3_MOBILE' && mobileTab === '03')) && (
-          <LocalLibraryPanel
-            tracks={tracks}
-            isBuilding={isBuilding}
-            buildProgress={buildProgress}
-            canCancel={Boolean(activeJobId)}
-            onCancelBuild={handleCancelBuild}
-            onBuildLibrary={handleBuildLibrary}
-            onFatSort={handleFatSort}
-            onDotClean={handleDotClean}
-          />
+            {((layoutTier === 'TIER_2_SPLIT' && splitRightTab === '02') ||
+              (layoutTier === 'TIER_3_MOBILE' && mobileTab === '02')) &&
+              inspectorView}
+
+            {((layoutTier === 'TIER_2_SPLIT' && splitRightTab === '03') ||
+              (layoutTier === 'TIER_3_MOBILE' && mobileTab === '03')) && (
+              <LocalLibraryPanel
+                tracks={tracks}
+                isBuilding={isBuilding}
+                buildProgress={buildProgress}
+                canCancel={Boolean(activeJobId)}
+                onCancelBuild={handleCancelBuild}
+                onBuildLibrary={handleBuildLibrary}
+                onFatSort={handleFatSort}
+                onDotClean={handleDotClean}
+              />
+            )}
+          </>
         )}
       </main>
+
+      {isDesktop && (
+        <BuildBar
+          tracks={tracks}
+          libraryRoot={libraryRoot}
+          isBuilding={isBuilding}
+          progress={buildProgress}
+          canCancel={Boolean(activeJobId)}
+          onBrowse={handleBrowseFolder}
+          onBuild={handleBuildLibrary}
+          onCancel={handleCancelBuild}
+          onFatSort={handleFatSort}
+          onDotClean={handleDotClean}
+        />
+      )}
 
       <TelemetryFooter logMessage={logMessage} okCount={okCount} totalCount={tracks.length} />
     </div>

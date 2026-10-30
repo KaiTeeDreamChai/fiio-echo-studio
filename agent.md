@@ -11,7 +11,7 @@ This document is the authoritative technical reference for AI Agents taking over
 - **License**: WTFPL (`LICENSE`)
 - **Target Hardware**: SNOWSKY / FiiO Echo Mini & portable lossless DAPs with embedded decoders and FAT32 microSD storage.
 - **Design System**: **Swiss International Typographic Style** (asymmetric 3-column grid, `#000000` / `#FFFFFF` / `#F4F4F0` + `#FF3300` accent, tabular monospace telemetry, full Light/Dark mode).
-- **Version**: `1.1.0` (API `1.1.0`, manifest schema `1.1.0`)
+- **Version**: `1.2.0` (API `1.2.0`, manifest schema `1.1.0`)
 
 ---
 
@@ -42,7 +42,20 @@ Wraps the bundled `ncmdump`. **The output container decides the extension**: `Pi
 - `fat_sort_directory()`: moves each directory's files to a staging bucket inside the card and moves them back in sorted order to rebuild directory entries. **Best-effort**: the FS driver owns final ordering.
 - `dot_clean_directory()`: deletes `._*`, `.DS_Store`, `.Spotlight-V100`, `.Trashes`, `.fseventsd`, then runs `/usr/sbin/dot_clean -m`.
 
-### 2.6 FAT32-safe naming — `engine/core/naming.py`
+### 2.6 Data-source discovery — `engine/providers/netease_db.py`
+Never hardcode the user's database path or download folder.
+- `_detect_db_path()` scans Application Support / Containers patterns, validates `offlineTrack` + `requestCache`, and picks the largest valid DB (legacy DBs are much smaller). `NETEASE_DB_PATH` overrides.
+- `_detect_download_dir()` scores candidate roots (`~/Music`, `~/Downloads`, subfolders, volumes, common NetEase folder names) against real `newRelativePath` values; the best hit-rate wins. `NETEASE_DOWNLOAD_DIR` overrides.
+- `POST /api/reload-sources` re-runs detection (used by “重新探测”); `/api/status` returns the detection report.
+
+### 2.7 Native macOS menu — `app_launcher.py`
+The packaged app replaces pywebview's default menu with an AppKit `NSMenu` built in `build_macos_menu()`:
+- Installed on the **main thread** via `PyObjCTools.AppHelper.callAfter` (pywebview's `start(func=...)` runs in a worker thread).
+- Menu names/roles: 文件 (⌘R rescan, ⌘B build, ⌘O choose root, ⌘W close), 编辑 (undo/redo/cut/copy/paste/select all — required for text inputs), 视图 (⌘T theme, ⌘⇧R reload, ⌃⌘F fullscreen), 窗口, 帮助.
+- Custom items dispatch `window.dispatchEvent(new CustomEvent('fiio:menu', {detail: action}))`; `App.tsx` listens and calls the existing handlers (rescan/build/theme/choose-root/reload).
+- `--dump-menu` prints the native menu tree without opening a window (useful for CI/verification).
+
+### 2.8 FAT32-safe naming — `engine/core/naming.py`
 Every destination path goes through `sanitize_filename()` / `sanitize_relative_dir()` / `build_dest_stem()`:
 - `\ / : * ? " < > |` → full-width equivalents, control chars stripped, trailing dots/spaces removed;
 - `..` and absolute segments dropped (no path traversal);

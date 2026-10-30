@@ -68,7 +68,7 @@ rm -rf "dist_app/FiiO Echo Studio"
 
 # 3. Create DMG Installer
 echo "[4/5] Creating DMG Disk Image..."
-DMG_NAME="FiiO_Echo_Studio_v1.1.0_arm64.dmg"
+DMG_NAME="FiiO_Echo_Studio_v1.2.0_arm64.dmg"
 DMG_STAGING="dist_app/dmg_staging"
 
 rm -rf "$DMG_STAGING" "dist_app/$DMG_NAME"

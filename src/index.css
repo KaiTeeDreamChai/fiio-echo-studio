@@ -88,8 +88,14 @@
   background-color: inherit;
 }
 
-@container (width < 450px) {
+@container (width < 640px) {
   .table-wrapper .col-secondary {
+    display: none;
+  }
+}
+
+@container (width < 560px) {
+  .table-wrapper .col-folder {
     display: none;
   }
 }
@@ -125,6 +131,29 @@
   flex: 1 1 0%;
   min-height: 0;
   overflow: hidden;
+}
+
+.desktop-main {
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr) 384px;
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+}
+
+.desktop-pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.desktop-pane > section {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
 }
 
 .panel-scroll {

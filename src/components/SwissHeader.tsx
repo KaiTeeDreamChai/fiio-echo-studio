@@ -46,7 +46,7 @@ export const SwissHeader: React.FC<SwissHeaderProps> = ({
             <h1 className="font-bold tracking-tight text-sm uppercase truncate">SNOWSKY / FIIO ECHO STUDIO</h1>
           </div>
           <p className="text-xs text-[var(--muted-foreground)] swiss-mono truncate">
-            LOCAL LIBRARY NORMALIZER // v1.1.0 WORKBENCH
+            LOCAL LIBRARY NORMALIZER // v1.2.0 WORKBENCH
           </p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0 ml-2">

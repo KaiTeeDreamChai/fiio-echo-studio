@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { TrackItem, ClassifyMode, FilterType } from '../types/library';
 import type { RemoteAlbum, RemotePlaylist } from '../services/api';
+import { fuzzyScore } from '../lib/fuzzy';
 
 interface QueuePanelProps {
   tracks: TrackItem[];
@@ -14,6 +15,7 @@ interface QueuePanelProps {
   onlyMine: boolean;
   isLoadingDb: boolean;
   customFolders: string[];
+  hideSource?: boolean;
   onSelectTrack: (id: number) => void;
   onToggleCheck: (id: number, checked: boolean) => void;
   onToggleSelectAll: (checked: boolean) => void;
@@ -42,6 +44,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
   onlyMine,
   isLoadingDb,
   customFolders,
+  hideSource = false,
   onSelectTrack,
   onToggleCheck,
   onToggleSelectAll,
@@ -77,6 +80,17 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
     }
   }, [customFolders, manualDest]);
 
+  const visiblePlaylists = useMemo(() => {
+    const keyword = preferredCreator.trim();
+    if (!keyword) return availablePlaylists;
+    const matched: RemotePlaylist[] = [];
+    const rest: RemotePlaylist[] = [];
+    availablePlaylists.forEach((playlist) => {
+      (fuzzyScore(keyword, playlist.creator) !== null ? matched : rest).push(playlist);
+    });
+    return onlyMine ? matched : [...matched, ...rest];
+  }, [availablePlaylists, preferredCreator, onlyMine]);
+
   const filteredTracks = tracks.filter((t) => {
     if (activeFilter === 'issues') return t.status === 'NEEDS_FIX';
     if (activeFilter === 'ok') return t.status === 'COMPLIANT';
@@ -105,17 +119,16 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
     <section id="col-01" className="col-span-12 md:col-span-6 xl:col-span-5 swiss-border-r flex flex-col min-h-0 h-full">
       {/* Section Header */}
       <div className="px-3.5 py-2.5 swiss-border-b flex items-center justify-between bg-[var(--sidebar)] shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="swiss-mono text-xs font-bold px-1.5 py-0.5 bg-[var(--badge-bg)] text-[var(--badge-fg)] border border-[var(--border)]">
-            01
+        <div className="flex items-baseline gap-3 min-w-0">
+          <h2 className="text-xs font-bold tracking-wider shrink-0">曲目</h2>
+          <span className="swiss-mono text-[10px] text-[var(--muted-foreground)] truncate">
+            {tracks[0]?.collectionName ?? '未选择来源'} · {tracks.length} 首
           </span>
-          <h2 className="text-xs font-bold uppercase tracking-wider">AUDIO INGEST &amp; CLASSIFICATION</h2>
         </div>
-        <span className="swiss-mono text-xs text-[var(--muted-foreground)]">
-          {tracks.length} TRACKS
-        </span>
       </div>
 
+      {!hideSource && (
+        <>
       {/* Mode 1 & 2 Tab Switcher */}
       <div className="p-2.5 swiss-border-b bg-[var(--background)] shrink-0 space-y-2">
         <div className="grid grid-cols-2 gap-1.5 swiss-mono text-xs">
@@ -236,14 +249,14 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                     onChange={(e) => setSelectedPlaylist(e.target.value)}
                     className="col-span-5 bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] px-2 py-1 text-xs font-semibold swiss-mono cursor-pointer focus:outline-none truncate"
                   >
-                    {availablePlaylists.map((p) => (
+                    {visiblePlaylists.map((p) => (
                       <option key={p.id} value={p.id} className="bg-[var(--card)] text-[var(--foreground)]">
                         {p.name} ({p.track_count}首 - {p.creator})
                       </option>
                     ))}
                   </select>
                   <button
-                    onClick={() => onApplyDbPlaylist(selectedPlaylist || availablePlaylists[0]?.id)}
+                    onClick={() => onApplyDbPlaylist(selectedPlaylist || visiblePlaylists[0]?.id)}
                     className="col-span-3 text-xs swiss-mono px-2 py-1 bg-[#FF3300] hover:bg-[#e02d00] text-white font-bold cursor-pointer truncate"
                   >
                     导入此歌单 →
@@ -316,6 +329,9 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
         )}
       </div>
 
+        </>
+      )}
+
       {/* Filter & Batch Selection Bar */}
       <div className="px-3.5 py-1.5 swiss-border-b flex items-center justify-between text-xs swiss-mono bg-[var(--sidebar)] shrink-0">
         <div className="flex items-center gap-2">
@@ -337,7 +353,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                 : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
             }`}
           >
-            ALL ({tracks.length})
+            全部 {tracks.length}
           </button>
           <span className="text-[var(--muted-foreground)]">/</span>
           <button
@@ -348,7 +364,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                 : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
             }`}
           >
-            已合规 ({okCount})
+            已合规 {okCount}
           </button>
           <span className="text-[var(--muted-foreground)]">/</span>
           <button
@@ -359,7 +375,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                 : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
             }`}
           >
-            待规范 ({needsFixCount})
+            待规范 {needsFixCount}
           </button>
           {notDownloadedCount > 0 && (
             <>
@@ -372,7 +388,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                     : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
                 }`}
               >
-                未下载 ({notDownloadedCount})
+                未下载 {notDownloadedCount}
               </button>
             </>
           )}
@@ -395,6 +411,39 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
         </div>
       </div>
 
+      {hideSource && checkedIds.size > 0 && (
+        <div className="px-3.5 py-1.5 swiss-border-b flex items-center gap-2 text-[11px] swiss-mono bg-[var(--card)] shrink-0">
+          <span className="font-bold">已选 {checkedIds.size} 首</span>
+          <select
+            value={manualDest}
+            onChange={(event) => setManualDest(event.target.value)}
+            className="bg-[var(--card)] border border-[var(--border)] px-1.5 py-0.5 text-[10px] max-w-[180px]"
+            aria-label="选择目标分类"
+          >
+            {customFolders.map((folder) => (
+              <option key={folder} value={folder}>
+                {folder}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => {
+              onMoveToDest(manualDest);
+              onToggleSelectAll(false);
+            }}
+            className="px-2 py-0.5 bg-[var(--active-bg)] text-[var(--active-fg)] font-bold cursor-pointer"
+          >
+            移入
+          </button>
+          <button
+            onClick={() => onToggleSelectAll(false)}
+            className="px-1.5 py-0.5 border border-[var(--border)] cursor-pointer"
+          >
+            清除
+          </button>
+        </div>
+      )}
+
       {/* Track Queue Table */}
       <div tabIndex={0} role="region" aria-labelledby="queue-table-caption" className="table-wrapper panel-scroll">
         <table className="text-left text-xs">
@@ -404,11 +453,11 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
           <thead className="bg-[var(--sidebar)] text-[var(--muted-foreground)] swiss-mono uppercase">
             <tr>
               <th className="py-2 px-2 swiss-border-b font-semibold w-8">#</th>
-              <th className="py-2 px-2 swiss-border-b font-semibold">TRACK / TITLE</th>
-              <th className="py-2 px-2 swiss-border-b font-semibold">TARGET FOLDER</th>
-              <th className="py-2 px-2 swiss-border-b font-semibold col-secondary">BLOCK</th>
-              <th className="py-2 px-2 swiss-border-b font-semibold col-secondary">COVER</th>
-              <th className="py-2 px-3 swiss-border-b font-semibold text-right">STATE</th>
+              <th className="py-2 px-2 swiss-border-b font-semibold">曲目</th>
+              <th className="py-2 px-2 swiss-border-b font-semibold col-folder">分类</th>
+              <th className="py-2 px-2 swiss-border-b font-semibold col-secondary">帧</th>
+              <th className="py-2 px-2 swiss-border-b font-semibold col-secondary">封面</th>
+              <th className="py-2 px-3 swiss-border-b font-semibold text-right">状态</th>
             </tr>
           </thead>
           <tbody className="swiss-mono divide-y divide-[var(--border)]">
@@ -447,9 +496,9 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                       </span>
                     )}
                   </th>
-                  <td className="py-2 px-2 truncate max-w-[120px]">
-                    <span className="px-1 py-0.5 border border-[var(--border)] bg-[var(--background)] text-xs">
-                      {t.targetFolder}
+                  <td className="py-2 px-2 truncate max-w-[150px] col-folder">
+                    <span className="text-[10px] text-[var(--muted-foreground)]" title={t.targetFolder}>
+                      {t.targetFolder.replace(/^Albums\//, '').replace(/^Playlists\//, '')}
                     </span>
                   </td>
                   <td className="py-2 px-2 col-secondary">
@@ -489,15 +538,27 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                       </span>
                     )}
                   </td>
-                  <td className="py-2 px-3 text-right">
+                  <td className="py-2 px-3 text-right whitespace-nowrap">
                     {t.status === 'COMPLIANT' ? (
-                      <span className="px-1.5 py-0.5 bg-emerald-600 text-white font-bold">OK</span>
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600">
+                        <i className="inline-block w-1.5 h-1.5 bg-emerald-600 not-italic" />合规
+                      </span>
                     ) : t.status === 'NEEDS_FIX' ? (
-                      <span className="px-1.5 py-0.5 bg-[#FF3300] text-white font-bold">
-                        {t.encrypted ? '构建' : 'FIX'}
+                      <span
+                        className={`inline-flex items-center gap-1 text-[10px] font-semibold ${
+                          t.encrypted ? 'text-[var(--muted-foreground)]' : 'text-[#FF3300]'
+                        }`}
+                      >
+                        <i
+                          className={`inline-block w-1.5 h-1.5 not-italic ${
+                            t.encrypted ? 'bg-[var(--muted-foreground)]' : 'bg-[#FF3300]'
+                          }`}
+                        />
+                        {t.encrypted ? '待解密' : '待规范'}
                       </span>
                     ) : (
-                      <span className="px-1.5 py-0.5 bg-[var(--muted)] text-[var(--muted-foreground)] border border-[var(--border)] font-bold text-xs">
+                      <span className="inline-flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]">
+                        <i className="inline-block w-1.5 h-1.5 bg-[var(--muted-foreground)] not-italic" />
                         未下载
                       </span>
                     )}
@@ -510,6 +571,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
       </div>
 
       {/* Column Footer */}
+      {!hideSource && (
       <div className="px-3.5 py-2.5 swiss-border-t bg-[var(--sidebar)] flex items-center justify-between text-xs swiss-mono shrink-0">
         <span className="truncate">
           NAMING: <strong className="font-semibold">{'{01..N}'} {'{Artist}'} - {'{Title}'}.flac / .mp3</strong>
@@ -523,9 +585,10 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
               : 'bg-[#FF3300]'
           }`}
         >
-          {okCount > 0 ? `${okCount}/${tracks.length} OK` : `${needsFixCount} 待规范`}
+          {okCount > 0 ? `${okCount}/${tracks.length} 合规` : `${needsFixCount} 待规范`}
         </span>
       </div>
+      )}
     </section>
   );
 };

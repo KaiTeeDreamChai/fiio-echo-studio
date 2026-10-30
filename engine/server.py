@@ -37,7 +37,7 @@ from engine.core.lrc_sanitizer import LrcSanitizer
 from engine.core.pipeline import PipelineOrchestrator
 from engine.providers.netease_db import NetEaseDBProvider
 
-API_VERSION = "1.1.0"
+API_VERSION = "1.2.0"
 DEFAULT_PORT = 57123
 DEFAULT_LIBRARY_ROOT = "~/Music/FiiO_Echo_Library"
 MAX_INSPECT_FILES = 5000
@@ -276,6 +276,7 @@ class StudioAPIHandler(BaseHTTPRequestHandler):
                     "db_available": self.provider.is_available(),
                     "db_path": self.provider.db_path,
                     "download_dir": self.provider.download_dir,
+                    "detection": self.provider.detection,
                     "ffmpeg_available": bool(ffmpeg_path and os.path.exists(ffmpeg_path)),
                     "ncmdump_available": bool(ncmdump_path and os.path.exists(ncmdump_path)),
                 })
@@ -417,6 +418,18 @@ class StudioAPIHandler(BaseHTTPRequestHandler):
         path = parsed.path
 
         try:
+            if path == "/api/reload-sources":
+                provider = NetEaseDBProvider()
+                StudioAPIHandler.provider = provider
+                self.provider = provider
+                self._send_json(200, {
+                    "success": True,
+                    "db_path": provider.db_path,
+                    "download_dir": provider.download_dir,
+                    "detection": provider.detection,
+                })
+                return
+
             if path == "/api/build-library":
                 body = self._read_body()
                 library_root = os.path.expanduser(

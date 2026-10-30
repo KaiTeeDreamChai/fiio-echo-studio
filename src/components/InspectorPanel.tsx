@@ -21,35 +21,33 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
   const isMp3 = track.container === 'mp3';
   const blockUnknown = track.blockSize === null;
 
-  const reframeBadge = isCloudOnly
-    ? 'CLOUD ONLY'
+  const reframeState = isCloudOnly
+    ? '未下载'
     : track.encrypted
-      ? 'DECRYPT + MEASURE'
+      ? '待解密'
       : isMp3
-        ? 'N/A (MP3 容器)'
+        ? '不适用'
         : blockUnknown
-          ? 'UNKNOWN'
+          ? '未知'
           : track.blockSize !== null && track.blockSize > 4096
-            ? 'REFRAME REQUIRED'
-            : 'COMPLIANT (≤4096)';
+            ? '需重封装'
+            : '合规';
 
-  const reframeClass = isCloudOnly
-    ? 'bg-[var(--muted)] text-[var(--muted-foreground)]'
-    : isMp3
-      ? 'bg-[var(--badge-bg)] text-[var(--badge-fg)]'
-      : blockUnknown || (track.blockSize !== null && track.blockSize > 4096)
-        ? 'bg-[#FF3300] text-white'
-        : 'bg-emerald-600 text-white';
+  const reframeColor = isCloudOnly || track.encrypted || isMp3
+    ? 'text-[var(--muted-foreground)]'
+    : blockUnknown || (track.blockSize !== null && track.blockSize > 4096)
+      ? 'text-[#FF3300]'
+      : 'text-emerald-600';
 
-  const coverBadge = isCloudOnly
-    ? 'CLOUD ONLY'
+  const coverState = isCloudOnly
+    ? '未下载'
     : track.encrypted
-      ? 'DECRYPT + NORMALIZE'
+      ? '待解密'
       : track.coverCompliant
-        ? 'COMPLIANT JPEG'
+        ? '合规'
         : track.coverRes === '无封面'
-          ? 'NO COVER'
-          : 'CONVERT 4:2:0';
+          ? '无封面'
+          : '需转换';
 
   const coverEncoding =
     track.coverRes === '无封面' || track.coverRes === '—'
@@ -70,173 +68,140 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
       : track.encrypted
         ? '构建时确定'
         : track.coverRes === '无封面'
-          ? (track.coverLocalPath ? '本地 meta 缓存（构建时写入）' : '需要联网补全')
+          ? (track.coverLocalPath ? '本地 meta（构建时写入）' : '需要联网补全')
           : '内嵌图片块';
 
-  const statusText = isCompliant
-    ? 'STATUS: 100% HARDWARE COMPLIANT'
+  const lrcStateLabel =
+    track.lrcState === 'CLEAN'
+      ? '已清洗'
+      : track.lrcState === 'JSON_DIRTY'
+        ? '含 JSON 脏词'
+        : '三位毫秒';
+
+  const footerStatus = isCompliant
+    ? '合规'
     : isCloudOnly
-      ? 'STATUS: CLOUD ONLY (NOT DOWNLOADED)'
+      ? '未下载'
       : track.encrypted
-        ? 'STATUS: ENCRYPTED — 构建时解密并复核'
-        : 'STATUS: PENDING NORMALIZATION';
+        ? '待解密'
+        : '待规范化';
+
+  const folderLabel = track.targetFolder.replace(/^(Albums|Playlists)\//, '');
 
   return (
     <section
       id="col-02"
       className="col-span-12 md:col-span-6 xl:col-span-4 swiss-border-r flex flex-col min-h-0 h-full"
     >
-      {/* Section Header */}
-      <div className="px-3.5 py-2.5 swiss-border-b flex items-center justify-between bg-[var(--sidebar)] shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="swiss-mono text-xs font-bold px-1.5 py-0.5 bg-[var(--badge-bg)] text-[var(--badge-fg)] border border-[var(--border)]">
-            02
-          </span>
-          <h2 className="text-xs font-bold uppercase tracking-wider">SPECIFICATION MATRIX</h2>
-        </div>
-        <span className="swiss-mono text-xs font-bold text-[#FF3300]">TRACK #{track.seq}</span>
+      <div className="px-4 py-2.5 swiss-border-b flex items-baseline justify-between bg-[var(--sidebar)] shrink-0">
+        <h2 className="text-xs font-bold tracking-wider">参数</h2>
+        <span className="swiss-mono text-[10px] text-[var(--muted-foreground)]">曲目 #{track.seq}</span>
       </div>
 
-      {/* Inspector Body */}
       <div className="panel-scroll divide-y divide-[var(--border)]">
         {isCloudOnly && (
-          <div className="p-3 bg-amber-500/10 border-b border-amber-500/20 text-xs swiss-mono text-amber-600 dark:text-amber-400 flex items-start gap-2">
-            <span className="shrink-0 font-bold">⚠️ [未下载音频]</span>
-            <span>
-              该曲目目前仅存在于网易云歌单中，本地未下载音频文件。请先在网易云客户端中下载该曲目，刷新后即可标准化并写入播放器乐库。
-            </span>
+          <div className="px-4 py-2.5 bg-amber-500/10 text-[10px] leading-relaxed text-amber-600 dark:text-amber-400">
+            该曲目仅存在于云端。请先在网易云客户端下载音频，再回到这里构建。
           </div>
         )}
 
-        {/* Track Summary & Cover Art Preview */}
-        <div className="p-3.5 grid grid-cols-12 gap-3.5 items-center">
-          <div className="col-span-4 aspect-square max-w-[110px] border border-[var(--border)] bg-[var(--sidebar)] relative flex flex-col justify-between p-1.5 overflow-hidden">
-            <div className="flex justify-between items-start z-10">
-              <span className="swiss-mono text-xs font-bold px-1 bg-[var(--card)] border border-[var(--border)]">
-                TYPE {track.coverType ?? '—'}
-              </span>
-            </div>
-            <div className="my-auto flex items-center justify-center">
-              <div className="w-9 h-9 rounded-full bg-[#FF3300] opacity-90" />
-              <div className="w-9 h-9 border-2 border-[var(--foreground)] -ml-3" />
-            </div>
-            <div className="z-10 bg-[var(--card)] px-1 py-0.5 border border-[var(--border)] text-center">
-              <div className="swiss-mono text-xs font-bold truncate">{track.coverRes}</div>
+        {/* 曲目概览 */}
+        <div className="p-4 flex gap-3 items-start">
+          <div className="w-[88px] h-[88px] shrink-0 border border-[var(--border)] bg-[var(--sidebar)] relative overflow-hidden">
+            <div className="absolute left-3.5 top-5 w-9 h-9 rounded-full bg-[#FF3300] opacity-90" />
+            <div className="absolute left-8 top-5 w-8 h-8 border-2 border-[var(--foreground)]" />
+            <div className="absolute inset-x-0 bottom-0 py-0.5 text-center swiss-mono text-[8px] bg-[var(--card)] border-t border-[var(--border)]">
+              {track.coverRes === '无封面' ? '无封面' : track.coverRes}
             </div>
           </div>
-
-          <div className="col-span-8 space-y-1 min-w-0">
-            <div className="swiss-mono text-xs text-[var(--muted-foreground)] truncate">
-              SOURCE: {track.artist} - {track.title}
-              {track.srcExt}
-            </div>
-            <h3 className="text-sm font-bold tracking-tight leading-snug truncate">
-              {track.seq} {track.artist} - {track.title}
-              {isMp3 ? '.mp3' : '.flac'}
-            </h3>
-            <p className="text-xs text-[var(--muted-foreground)] truncate">
-              Target: {track.targetFolder}/{track.seq} {track.artist} - {track.title}
-              {isMp3 ? '.mp3' : '.flac'}
-            </p>
-            <div className="pt-1 flex flex-wrap gap-1.5 swiss-mono text-xs">
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="text-[15px] font-bold leading-snug truncate">{track.title}</h3>
+            <div className="text-[11px] text-[var(--muted-foreground)] truncate">{track.artist}</div>
+            <div className="text-[10px] text-[var(--muted-foreground)] truncate">{track.album}</div>
+            <div className="pt-1.5 flex flex-wrap gap-1.5 swiss-mono text-[9px]">
               <span className="px-1.5 py-0.5 border border-[var(--border)] bg-[var(--background)]">
-                {track.pcm}
-              </span>
-              <span className="px-1.5 py-0.5 border border-[var(--border)] bg-[var(--background)]">
-                UTF-8 CRLF
+                {isMp3 ? 'MP3' : 'FLAC'}
               </span>
               <span className="px-1.5 py-0.5 border border-[var(--border)] bg-[var(--background)]">
                 {(track.sizeBytes / 1024 / 1024).toFixed(1)} MB
               </span>
+              <span
+                className="px-1.5 py-0.5 border border-[var(--border)] bg-[var(--background)] max-w-[120px] truncate"
+                title={track.targetFolder}
+              >
+                {folderLabel}
+              </span>
             </div>
           </div>
         </div>
 
-        {/* 1. Audio Stream & Frame Buffer */}
-        <div className="p-3.5">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-bold uppercase tracking-wider">
-              A. 音频流与帧大小 (STREAMINFO)
-            </span>
-            <span className={`swiss-mono text-xs px-1.5 py-0.5 font-bold ${reframeClass}`}>
-              {reframeBadge}
-            </span>
+        {/* 音频流 */}
+        <div className="px-4 py-3">
+          <div className="flex items-baseline justify-between mb-2">
+            <h4 className="text-[11px] font-bold tracking-wider">音频流</h4>
+            <span className={`swiss-mono text-[10px] font-semibold ${reframeColor}`}>{reframeState}</span>
           </div>
-          <div className="grid grid-cols-3 gap-2 swiss-mono text-xs bg-[var(--background)] p-2 border border-[var(--border)]">
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <div className="text-[var(--muted-foreground)]">PCM SPEC</div>
-              <div className="font-bold mt-0.5">{track.pcm}</div>
+              <div className="text-[9px] text-[var(--muted-foreground)]">位深 / 采样率</div>
+              <div className="swiss-mono text-[11px] font-semibold mt-1">{track.pcm}</div>
             </div>
             <div>
-              <div className="text-[var(--muted-foreground)]">CURRENT BLOCK</div>
+              <div className="text-[9px] text-[var(--muted-foreground)]">当前帧</div>
               <div
-                className={`font-bold mt-0.5 ${
+                className={`swiss-mono text-[11px] font-semibold mt-1 ${
                   !isMp3 && (blockUnknown || (track.blockSize !== null && track.blockSize > 4096))
                     ? 'text-[#FF3300]'
-                    : 'text-emerald-600'
+                    : ''
                 }`}
               >
-                {isMp3
-                  ? '不适用'
-                  : blockUnknown
-                    ? track.encrypted
-                      ? '待解密'
-                      : '—'
-                    : track.blockSize}
+                {isMp3 ? '不适用' : blockUnknown ? (track.encrypted ? '待解密' : '—') : track.blockSize}
               </div>
             </div>
             <div>
-              <div className="text-[var(--muted-foreground)]">TARGET BLOCK</div>
-              <div className="font-bold text-emerald-600 mt-0.5">
-                {isMp3 ? '不适用' : '4096 (SAFE)'}
-              </div>
+              <div className="text-[9px] text-[var(--muted-foreground)]">目标帧</div>
+              <div className="swiss-mono text-[11px] font-semibold mt-1">{isMp3 ? '不适用' : '4096'}</div>
             </div>
           </div>
         </div>
 
-        {/* 2. Album Cover Art Spec */}
-        <div className="p-3.5">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-bold uppercase tracking-wider">
-              B. 专辑封面格式规范 (PICTURE BLOCK)
-            </span>
+        {/* 封面 */}
+        <div className="px-4 py-3">
+          <div className="flex items-baseline justify-between mb-2">
+            <h4 className="text-[11px] font-bold tracking-wider">封面</h4>
             <span
-              className={`swiss-mono text-xs px-1.5 py-0.5 font-bold ${
-                track.coverCompliant
-                  ? 'bg-emerald-600 text-white'
-                  : isCloudOnly
-                    ? 'bg-[var(--muted)] text-[var(--muted-foreground)]'
-                    : 'bg-[#FF3300] text-white'
+              className={`swiss-mono text-[10px] font-semibold ${
+                track.coverCompliant ? 'text-emerald-600' : 'text-[#FF3300]'
               }`}
             >
-              {coverBadge}
+              {coverState}
             </span>
           </div>
-          <div className="grid grid-cols-3 gap-2 swiss-mono text-xs bg-[var(--background)] p-2 border border-[var(--border)]">
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <div className="text-[var(--muted-foreground)]">RESOLUTION</div>
-              <div className="font-bold mt-0.5">
+              <div className="text-[9px] text-[var(--muted-foreground)]">分辨率</div>
+              <div className="swiss-mono text-[11px] font-semibold mt-1">
                 {isCloudOnly || track.coverRes === '—' ? '—' : track.coverRes}
               </div>
             </div>
             <div>
-              <div className="text-[var(--muted-foreground)]">CHROMA SUB</div>
+              <div className="text-[9px] text-[var(--muted-foreground)]">色度</div>
               <div
-                className={`font-bold mt-0.5 ${
-                  track.coverCompliant ? 'text-emerald-600' : 'text-[#FF3300]'
+                className={`swiss-mono text-[11px] font-semibold mt-1 ${
+                  track.coverCompliant ? '' : 'text-[#FF3300]'
                 }`}
               >
                 {track.coverYuv}
               </div>
             </div>
             <div>
-              <div className="text-[var(--muted-foreground)]">ENCODING</div>
-              <div className="font-bold mt-0.5">{coverEncoding}</div>
+              <div className="text-[9px] text-[var(--muted-foreground)]">编码</div>
+              <div className="swiss-mono text-[11px] font-semibold mt-1">{coverEncoding}</div>
             </div>
           </div>
-          <div className="mt-1.5 flex items-center justify-between gap-2 text-xs swiss-mono">
-            <span className="text-[var(--muted-foreground)] truncate">
-              封面来源: <strong className="font-bold text-[var(--foreground)]">{coverSourceText}</strong>
+          <div className="mt-2 text-[9px] text-[var(--muted-foreground)] flex items-center justify-between gap-2">
+            <span className="truncate">
+              来源 <strong className="font-semibold text-[var(--foreground)]">{coverSourceText}</strong>
             </span>
             {!isCloudOnly && !track.encrypted && !track.coverCompliant && (
               <span className="text-[#FF3300] truncate" title={track.coverReasons.join(' / ')}>
@@ -246,69 +211,70 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
           </div>
         </div>
 
-        {/* 3. Companion LRC Sanitizer */}
-        <div className="p-3.5">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-bold uppercase tracking-wider">
-              C. 伴随歌词清洗 (.LRC SANITIZER)
-            </span>
-            <div className="flex items-center gap-1 swiss-mono text-xs">
+        {/* 歌词 */}
+        <div className="px-4 py-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <h4 className="text-[11px] font-bold tracking-wider">歌词</h4>
               <span
-                className={`px-1 border border-[var(--border)] ${
+                className={`swiss-mono text-[9px] ${
                   track.lrcState === 'CLEAN' ? 'text-emerald-600' : 'text-[#FF3300]'
                 }`}
               >
-                {track.lrcState}
+                {lrcStateLabel}
               </span>
+            </div>
+            <div className="flex items-center swiss-mono text-[9px]">
               <button
                 onClick={() => setLrcMode('raw')}
-                className={`px-1.5 py-0.5 border border-[var(--border)] cursor-pointer transition-colors ${
+                className={`px-1.5 py-0.5 border border-[var(--border)] cursor-pointer ${
                   lrcMode === 'raw'
-                    ? 'bg-[var(--active-bg)] text-[var(--active-fg)] font-bold shadow-sm'
-                    : 'bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                    ? 'bg-[var(--active-bg)] text-[var(--active-fg)] font-bold'
+                    : 'bg-[var(--card)] text-[var(--muted-foreground)]'
                 }`}
               >
-                RAW
+                原文
               </button>
               <button
                 onClick={() => setLrcMode('clean')}
-                className={`px-1.5 py-0.5 border border-[var(--border)] cursor-pointer transition-colors ${
+                className={`px-1.5 py-0.5 border border-[var(--border)] -ml-px cursor-pointer ${
                   lrcMode === 'clean'
-                    ? 'bg-[var(--active-bg)] text-[var(--active-fg)] font-bold shadow-sm'
-                    : 'bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                    ? 'bg-[var(--active-bg)] text-[var(--active-fg)] font-bold'
+                    : 'bg-[var(--card)] text-[var(--muted-foreground)]'
                 }`}
               >
-                CLEANED
+                清洗后
               </button>
             </div>
           </div>
-          <pre className="swiss-mono text-xs p-2 bg-[var(--background)] border border-[var(--border)] overflow-x-auto leading-relaxed min-h-[76px]">
+          <pre className="swiss-mono text-[10px] p-2 bg-[var(--background)] border border-[var(--border)] leading-relaxed min-h-[78px] whitespace-pre-wrap break-words">
             {lrcMode === 'raw' ? track.rawLrc : track.cleanLrc}
           </pre>
         </div>
       </div>
 
-      {/* Column Footer Action */}
-      <div className="px-3.5 py-2.5 swiss-border-t bg-[var(--sidebar)] flex items-center justify-between shrink-0">
-        <span className="swiss-mono text-xs text-[var(--muted-foreground)] truncate mr-2">
-          {statusText}
+      <div className="px-4 py-2.5 swiss-border-t bg-[var(--sidebar)] flex items-center justify-between shrink-0">
+        <span
+          className={`swiss-mono text-[10px] truncate mr-2 ${
+            isCompliant
+              ? 'text-emerald-600'
+              : isCloudOnly
+                ? 'text-[var(--muted-foreground)]'
+                : 'text-[#FF3300]'
+          }`}
+        >
+          {footerStatus}
         </span>
         <button
           onClick={() => onNormalizeTrack(track.id)}
           disabled={isCompliant || isCloudOnly || isBuilding}
-          className={`swiss-mono text-xs font-bold px-3 py-1 border transition-colors shrink-0 ${
+          className={`swiss-mono text-[10px] font-bold px-3 py-1.5 border transition-colors shrink-0 ${
             isCompliant || isCloudOnly || isBuilding
               ? 'border-[var(--border)] text-[var(--muted-foreground)] bg-[var(--card)] cursor-not-allowed'
-              : 'border-[var(--border)] bg-[var(--card)] hover:border-[#FF3300] hover:text-[#FF3300] cursor-pointer'
+              : 'border-[#FF3300] text-[#FF3300] bg-[var(--card)] hover:bg-[#FF3300] hover:text-white cursor-pointer'
           }`}
         >
-          {isNormalizing
-            ? '执行中...'
-            : isCompliant
-              ? '✓ COMPLIANT'
-              : isCloudOnly
-                ? 'NOT DOWNLOADED'
-                : 'NORMALIZE TRACK →'}
+          {isNormalizing ? '执行中…' : isCompliant ? '已合规' : isCloudOnly ? '未下载' : '规范化此曲 →'}
         </button>
       </div>
     </section>

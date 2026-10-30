@@ -14,12 +14,21 @@ import sqlite3
 import unicodedata
 from typing import List, Dict, Any, Optional
 
-DEFAULT_MODERN_DB = os.path.expanduser(
-    "~/Library/Application Support/com.netease.163music/Documents/storage/sqlite_storage.sqlite3"
-)
-DEFAULT_LEGACY_DB = os.path.expanduser(
-    "~/Library/Containers/com.netease.163music/Data/Documents/storage/sqlite_storage.sqlite3"
-)
+NETEASE_APP_DIR = os.path.expanduser("~/Library/Application Support/com.netease.163music")
+NETEASE_CONTAINER_DIR = os.path.expanduser("~/Library/Containers/com.netease.163music/Data")
+DB_FILENAME = "sqlite_storage.sqlite3"
+
+#: Ordered search patterns; the first valid candidate with the largest size wins.
+DB_SEARCH_PATTERNS = [
+    f"{NETEASE_APP_DIR}/Documents/storage/{DB_FILENAME}",
+    f"{NETEASE_CONTAINER_DIR}/Documents/storage/{DB_FILENAME}",
+    f"{NETEASE_CONTAINER_DIR}/Library/Application Support/com.netease.163music/Documents/storage/{DB_FILENAME}",
+    f"{NETEASE_APP_DIR}/Documents/**/{DB_FILENAME}",
+    f"{NETEASE_CONTAINER_DIR}/Documents/**/{DB_FILENAME}",
+]
+
+#: Folder names NetEase uses for downloads across versions / languages.
+DOWNLOAD_DIR_NAMES = ("网易云音乐", "网易云", "CloudMusic", "NetEase", "Music")
 DEFAULT_DOWNLOAD_DIR = os.path.expanduser("~/Music/网易云音乐")
 
 
@@ -27,16 +36,189 @@ class NetEaseDBProvider:
     """Safe, read-only reader for NetEase Cloud Music desktop database."""
 
     def __init__(self, db_path: Optional[str] = None, download_dir: Optional[str] = None):
+        self.db_candidates: List[str] = []
+        self.download_candidates: List[str] = []
+        self.download_matches = 0
+        self.download_sample_size = 0
+        self.db_source = "none"
+
         if db_path and os.path.exists(db_path):
             self.db_path = db_path
-        elif os.path.exists(DEFAULT_MODERN_DB):
-            self.db_path = DEFAULT_MODERN_DB
-        elif os.path.exists(DEFAULT_LEGACY_DB):
-            self.db_path = DEFAULT_LEGACY_DB
+            self.db_source = "explicit"
         else:
-            self.db_path = None
+            self.db_path = self._detect_db_path()
 
-        self.download_dir = download_dir or DEFAULT_DOWNLOAD_DIR
+        self.download_dir = download_dir or self._detect_download_dir()
+        self.detection = {
+            "db_path": self.db_path,
+            "db_source": self.db_source,
+            "db_candidates": self.db_candidates,
+            "download_dir": self.download_dir,
+            "download_candidates": self.download_candidates,
+            "download_matched": self.download_matches,
+            "download_sample_size": self.download_sample_size,
+        }
+
+    # ------------------------------------------------------------- detection
+    @staticmethod
+    def _is_valid_db(path: str) -> bool:
+        """A usable NetEase DB must expose offlineTrack + requestCache."""
+        try:
+            conn = sqlite3.connect(f"file:{os.path.abspath(path)}?mode=ro", uri=True)
+            names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            conn.close()
+            return "offlineTrack" in names and "requestCache" in names
+        except Exception:
+            return False
+
+    def _detect_db_path(self) -> Optional[str]:
+        """Find the NetEase SQLite DB on this machine instead of assuming one path."""
+        candidates: List[str] = []
+
+        env_path = os.environ.get("NETEASE_DB_PATH", "").strip()
+        if env_path:
+            candidates.append(os.path.expanduser(env_path))
+            if os.path.exists(candidates[0]):
+                self.db_source = "env"
+                self.db_candidates = candidates
+                return candidates[0]
+
+        for pattern in DB_SEARCH_PATTERNS:
+            expanded = os.path.expanduser(pattern)
+            for match in glob.glob(expanded, recursive=True):
+                if os.path.isfile(match) and match not in candidates:
+                    candidates.append(match)
+
+        valid = []
+        for path in candidates:
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                continue
+            if self._is_valid_db(path):
+                valid.append((size, path))
+
+        self.db_candidates = candidates
+        if not valid:
+            self.db_source = "none"
+            return None
+
+        # Multiple installs/containers may exist (legacy DB is much smaller).
+        valid.sort(reverse=True)
+        self.db_source = "scan"
+        return valid[0][1]
+
+    def _read_relative_paths(self, limit: int = 60) -> List[str]:
+        if not self.db_path or not os.path.exists(self.db_path):
+            return []
+        try:
+            conn = sqlite3.connect(f"file:{os.path.abspath(self.db_path)}?mode=ro", uri=True)
+            rows = conn.execute(
+                "SELECT newRelativePath FROM offlineTrack "
+                "WHERE newRelativePath IS NOT NULL AND newRelativePath != '' LIMIT ?",
+                (limit,),
+            ).fetchall()
+            conn.close()
+            return [str(row[0]) for row in rows if row and row[0]]
+        except Exception:
+            return []
+
+    def _download_root_candidates(self) -> List[str]:
+        home = os.path.expanduser("~")
+        roots: List[str] = []
+
+        if getattr(self, "download_dir", None) and os.path.isdir(self.download_dir):
+            roots.append(self.download_dir)
+
+        env_dir = os.environ.get("NETEASE_DOWNLOAD_DIR", "").strip()
+        if env_dir:
+            roots.append(os.path.expanduser(env_dir))
+
+        for base in (os.path.join(home, "Music"), os.path.join(home, "Downloads")):
+            if os.path.isdir(base):
+                roots.append(base)
+                try:
+                    for name in sorted(os.listdir(base)):
+                        child = os.path.join(base, name)
+                        if os.path.isdir(child):
+                            roots.append(child)
+                except OSError:
+                    pass
+
+        for name in DOWNLOAD_DIR_NAMES:
+            roots.append(os.path.join(home, "Music", name))
+            roots.append(os.path.join(home, "Downloads", name))
+
+        for volume in glob.glob("/Volumes/*"):
+            roots.append(volume)
+            for name in DOWNLOAD_DIR_NAMES:
+                roots.append(os.path.join(volume, name))
+
+        roots.append(DEFAULT_DOWNLOAD_DIR)
+
+        unique: List[str] = []
+        for root in roots:
+            normalized = os.path.abspath(os.path.expanduser(root))
+            if normalized not in unique:
+                unique.append(normalized)
+        return unique
+
+    def _detect_download_dir(self) -> str:
+        """
+        NetEase does not store the download root in its public settings, so score
+        candidate folders against the real ``newRelativePath`` values in the DB.
+        """
+        candidates = self._download_root_candidates()
+        self.download_candidates = candidates
+        relative_paths = self._read_relative_paths()
+        self.download_sample_size = len(relative_paths)
+
+        best_root = None
+        best_score = -1
+        best_meta = 0
+        for root in candidates:
+            if not os.path.isdir(root):
+                continue
+            hits = 0
+            for rel in relative_paths:
+                candidate = os.path.join(root, str(rel).lstrip("/"))
+                if os.path.exists(candidate):
+                    hits += 1
+            has_meta = 1 if os.path.isdir(os.path.join(root, "meta")) else 0
+            if hits > best_score or (hits == best_score and has_meta > best_meta):
+                best_score = hits
+                best_meta = has_meta
+                best_root = root
+            if hits == len(relative_paths) and relative_paths:
+                break
+
+        if best_root and best_score > 0:
+            self.download_matches = best_score
+            return best_root
+
+        env_dir = os.environ.get("NETEASE_DOWNLOAD_DIR", "").strip()
+        if env_dir and os.path.isdir(os.path.expanduser(env_dir)):
+            self.download_matches = 0
+            return os.path.abspath(os.path.expanduser(env_dir))
+
+        self.download_matches = 0
+        return DEFAULT_DOWNLOAD_DIR
+
+    def refresh_detection(self) -> Dict[str, Any]:
+        """Re-run discovery (called by the “重新探测” action)."""
+        if not self.db_path or not os.path.exists(self.db_path):
+            self.db_path = self._detect_db_path()
+        self.download_dir = self._detect_download_dir()
+        self.detection = {
+            "db_path": self.db_path,
+            "db_source": self.db_source,
+            "db_candidates": self.db_candidates,
+            "download_dir": self.download_dir,
+            "download_candidates": self.download_candidates,
+            "download_matched": self.download_matches,
+            "download_sample_size": self.download_sample_size,
+        }
+        return self.detection
 
     def is_available(self) -> bool:
         return bool(self.db_path and os.path.exists(self.db_path))
@@ -84,6 +266,50 @@ class NetEaseDBProvider:
             return ""
         return self._index_local_covers().get(clean_id, "")
 
+    def _user_playlist_context(self, cur) -> tuple:
+        """
+        Identify the logged-in user and the playlists they created / favorited.
+
+        - `page:userDetail` holds the profile (id / nickname) of the current account.
+        - `page:userDetail|userChange|<uid>` holds that user's createPlaylist /
+          favPlaylist record sets, which is the only reliable way to separate
+          "created by me" from "favorited by me".
+        """
+        self_id = None
+        created_ids = set()
+        favorited_ids = set()
+
+        try:
+            cur.execute("SELECT jsonStr FROM persistentModel WHERE uniKey = 'page:userDetail' LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                self_id = json.loads(row[0]).get("data", {}).get("id")
+        except Exception:
+            pass
+
+        if self_id:
+            try:
+                cur.execute(
+                    "SELECT jsonStr FROM persistentModel WHERE uniKey = ? LIMIT 1",
+                    (f"page:userDetail|userChange|{self_id}",),
+                )
+                row = cur.fetchone()
+                if row:
+                    data = json.loads(row[0]).get("data", {})
+                    for key, bucket in (("createPlaylist", created_ids), ("favPlaylist", favorited_ids)):
+                        obj = data.get(key) or {}
+                        if isinstance(obj, dict):
+                            for block in obj.values():
+                                if isinstance(block, dict):
+                                    for pl in block.get("records", []) or []:
+                                        pid = pl.get("id")
+                                        if pid is not None:
+                                            bucket.add(str(pid))
+            except Exception:
+                pass
+
+        return self_id, created_ids, favorited_ids
+
     def get_all_playlists(self, preferred_creator: Optional[str] = None, only_preferred: bool = False) -> List[Dict[str, Any]]:
         """
         Retrieve all playlists and cached playlist metadata.
@@ -113,8 +339,11 @@ class NetEaseDBProvider:
                             "type": "playlist",
                             "name": pl.get("name", f"歌单 {pid}"),
                             "track_count": pl.get("trackCount", 0),
-                            "creator": pl.get("creator", {}).get("nickname", "网易云用户"),
-                            "description": pl.get("description", "") or ""
+                            "creator": (pl.get("creator") or {}).get("nickname") or "网易云用户",
+                            "creator_id": (pl.get("creator") or {}).get("userId"),
+                            "description": pl.get("description", "") or "",
+                            "create_time": int(pl.get("createTime") or 0),
+                            "update_time": int(pl.get("updateTime") or 0)
                         }
                 except Exception:
                     pass
@@ -140,8 +369,11 @@ class NetEaseDBProvider:
                                             "type": "playlist",
                                             "name": pl.get("name", f"歌单 {pid}"),
                                             "track_count": pl.get("trackCount", 0),
-                                            "creator": pl.get("creator", {}).get("nickname", "网易云用户"),
-                                            "description": pl.get("description", "") or ""
+                                            "creator": (pl.get("creator") or {}).get("nickname") or "网易云用户",
+                                            "creator_id": (pl.get("creator") or {}).get("userId"),
+                                            "description": pl.get("description", "") or "",
+                                            "create_time": int(pl.get("createTime") or 0),
+                                            "update_time": int(pl.get("updateTime") or 0)
                                         }
                 except Exception:
                     pass
@@ -163,14 +395,29 @@ class NetEaseDBProvider:
                                 "type": "playlist",
                                 "name": evalue.get("name", f"歌单 {pid}"),
                                 "track_count": evalue.get("trackCount", 0),
-                                "creator": evalue.get("creator", {}).get("nickname", "网易云用户"),
-                                "description": evalue.get("description", "") or ""
+                                "creator": (evalue.get("creator") or {}).get("nickname") or "网易云用户",
+                                "creator_id": (evalue.get("creator") or {}).get("userId"),
+                                "description": evalue.get("description", "") or "",
+                                "create_time": int(evalue.get("createTime") or 0),
+                                "update_time": int(evalue.get("updateTime") or 0)
                             }
         except Exception:
             pass
 
+        self_id, created_ids, favorited_ids = self._user_playlist_context(cur)
         conn.close()
         all_pls = list(playlists_dict.values())
+
+        for playlist in all_pls:
+            pid = str(playlist.get("id"))
+            if pid in favorited_ids:
+                playlist["relation"] = "favorited"
+            elif pid in created_ids or (
+                self_id is not None and str(playlist.get("creator_id")) == str(self_id)
+            ):
+                playlist["relation"] = "created"
+            else:
+                playlist["relation"] = "cached"
 
         # Filtering / Priority Sorting
         if preferred_creator:

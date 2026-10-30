@@ -8,14 +8,33 @@ const API_BASE =
     ? 'http://127.0.0.1:57123/api'
     : '/api';
 
+export interface SourceDetection {
+  db_path: string | null;
+  db_source: string;
+  db_candidates: string[];
+  download_dir: string;
+  download_candidates: string[];
+  download_matched: number;
+  download_sample_size: number;
+}
+
 export interface BackendStatus {
   success: boolean;
   version: string;
   db_available: boolean;
   db_path: string | null;
   download_dir: string;
+  detection?: SourceDetection;
   ffmpeg_available: boolean;
   ncmdump_available: boolean;
+}
+
+export interface ReloadSourcesResponse {
+  success: boolean;
+  db_path?: string | null;
+  download_dir?: string;
+  detection?: SourceDetection;
+  error?: string;
 }
 
 export interface RemotePlaylist {
@@ -25,6 +44,10 @@ export interface RemotePlaylist {
   track_count: number;
   creator: string;
   description: string;
+  create_time?: number;
+  update_time?: number;
+  creator_id?: number | null;
+  relation?: 'created' | 'favorited' | 'cached';
 }
 
 export interface RemoteAlbum {
@@ -126,6 +149,12 @@ export interface BuildProgress {
 }
 
 export const StudioApi = {
+  /** Re-scan the local NetEase database and download folder. */
+  async reloadSources(): Promise<ReloadSourcesResponse> {
+    const res = await fetch(`${API_BASE}/reload-sources`, { method: 'POST' });
+    return res.json();
+  },
+
   async getStatus(): Promise<BackendStatus> {
     const res = await fetch(`${API_BASE}/status`);
     return res.json();
