@@ -1,7 +1,7 @@
 {
   "name": "fiio-echo-studio",
   "version": "1.2.0",
-  "description": "> A lightweight, cross-platform audio normalization & FAT32 sync studio tailored for the **SNOWSKY / FiiO Echo** portable lossless player, crafted with the **Swiss International Typographic Style**.",
+  "description": "Lossless library normalizer for FiiO / SNOWSKY portable DAPs.",
   "main": "index.js",
   "directories": {
     "doc": "docs"

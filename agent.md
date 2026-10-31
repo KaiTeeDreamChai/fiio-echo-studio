@@ -72,8 +72,14 @@ fiio-echo-studio/
 ├── app_launcher.py                 # Native macOS entrypoint (HTTP server thread + pywebview Cocoa window)
 ├── build_app.sh                    # One-click .app & .dmg packaging (provisions engine/bin first)
 ├── FiiO_Echo_Studio.spec           # PyInstaller bundle specification
-├── assets/screenshots/             # README screenshots
-├── docs/FIIO_ECHO_AUDIO_SPECIFICATION.md
+├── index.html                      # Vite entry
+├── vite.config.ts · tsconfig.json  # Build config (strict TS, noUnusedLocals)
+├── ui-prototype.html               # Standalone HTML design prototype (not shipped in the bundle)
+├── assets/                         # icon.icns + screenshots/ used by the README
+├── docs/
+│   ├── FIIO_ECHO_AUDIO_SPECIFICATION.md
+│   ├── DESKTOP_REDESIGN.md         # Tier-1 layout rationale
+│   └── MOBILE_UI.md                # Tier-3 layout rationale
 ├── engine/
 │   ├── server.py                   # Threaded HTTP API + background build jobs + Host/Origin guard
 │   ├── bridge.py                   # CLI: playlists/albums/tracks/inspect/build-library (JSON on stdout)
@@ -89,19 +95,35 @@ fiio-echo-studio/
 │   │   ├── lrc_sanitizer.py        # JSON/3-digit-ms cleanup, UTF-8(+optional BOM) CRLF
 │   │   ├── pipeline.py             # Per-track pipeline + FAT32 sort + dot_clean + manifest
 │   │   └── builder.py              # Shared library builder (server + CLI)
-│   └── tests/test_core.py          # 17 unit tests (skips media fixtures without ffmpeg)
+│   └── tests/test_core.py          # 21 unit tests (skips media fixtures without ffmpeg)
 └── src/
-    ├── App.tsx                     # Root state: real inspection, job polling, single-track build
-    ├── services/api.ts             # Typed fetch wrapper (/inspect, /build-library, /build-progress)
+    ├── App.tsx                     # Root state: collection loading, inspection, job polling, menu events
+    ├── main.tsx                    # React root
+    ├── index.css                   # Design tokens (--*) + the tier-1 desktop grid
+    ├── services/api.ts             # Typed fetch wrapper for every /api route
     ├── types/library.ts            # TrackItem (nullable real values), manifest schema v1.1
+    ├── lib/fuzzy.ts                # Mode-aware fuzzy search (albums / playlists)
     ├── hooks/useAdaptiveLayout.ts  # 3-tier layout (desktop / split / mobile)
     └── components/
-        ├── SwissHeader.tsx         # Theme, library root input (aria-label), BROWSE
-        ├── QueuePanel.tsx          # COL 01: album/playlist browser, real BLOCK/COVER columns
-        ├── InspectorPanel.tsx      # COL 02: telemetry, cover reasons, LRC diff
-        ├── LocalLibraryPanel.tsx   # COL 03: metrics, tree, FAT32 tools, build + progress/cancel
+        ├── DesktopHeader.tsx       # TIER 1 top bar (theme, reset)
+        ├── SwissHeader.tsx         # TIER 2/3 header: library root input (aria-label), BROWSE, theme
+        ├── SourceSidebar.tsx       # TIER 1 source column: album/playlist modes, search, creator filter, 我创建/我收藏
+        ├── QueuePanel.tsx          # COL 01: track queue, real BLOCK/COVER columns, classify + reorder
+        ├── InspectorPanel.tsx      # COL 02: telemetry, cover reasons, LRC before/after, single-track normalize
+        ├── LocalLibraryPanel.tsx   # COL 03 (TIER 2/3 only): collection list, split 执行 + BUILD buttons, FAT32 tools
+        ├── BuildBar.tsx            # TIER 1 bottom bar: totals, output root, progress/cancel, TF-card tools, build
         └── TelemetryFooter.tsx     # Live log + {ok}/{total} OK
 ```
+
+### 3.1 Layout tiers (`src/hooks/useAdaptiveLayout.ts`)
+
+| Tier | Breakpoint | Composition |
+|---|---|---|
+| `TIER_1_DESKTOP` | `width ≥ 1180` | `DesktopHeader` + 3-column grid `272px │ 1fr │ 384px` = `SourceSidebar` + `QueuePanel` + `InspectorPanel`, with `BuildBar` pinned across the bottom. **`LocalLibraryPanel` is not rendered in this tier.** |
+| `TIER_2_SPLIT` | `768 ≤ width < 1180` | `SwissHeader` + queue on the left; the right pane switches between COL 02 and COL 03. |
+| `TIER_3_MOBILE` | `width < 768` | `SwissHeader` + a three-tab switcher (01 / 02 / 03). |
+
+The build entry point therefore differs per tier: TIER 1 uses `BuildBar`'s single `开始构建` button, while TIER 2/3 use `LocalLibraryPanel`'s split `执行` / `BUILD LOCAL LIBRARY` pair (see invariant 8).
 
 ---
 
@@ -124,15 +146,18 @@ fiio-echo-studio/
 
 | Method | Route | Purpose |
 |---|---|---|
-| GET | `/api/status` | DB path, download dir, ffmpeg/ncmdump availability, version |
-| GET | `/api/albums` · `/api/playlists` · `/api/album-tracks` · `/api/playlist-tracks` | NetEase DB reads (tracks include `pic_url` + sanitized LRC) |
+| GET | `/api/status` | DB path, download dir, full detection report, ffmpeg/ncmdump availability, version |
+| GET | `/api/albums` · `/api/playlists` · `/api/album-tracks` · `/api/playlist-tracks` | NetEase DB reads (tracks include `pic_url`, `cover_local_path` + sanitized LRC). `/api/playlists` accepts `?creator=&only_mine=` |
 | GET | `/api/inspect?file=` | Single-file real telemetry |
-| POST | `/api/inspect` | `{files: []}` → `{items: {path: info}}` (thread pool 8, LRU cache by mtime+size) |
+| POST | `/api/inspect` | `{files: []}` → `{items: {path: info}}` (thread pool 8, LRU cache by mtime+size, cap 5000 files) |
+| POST | `/api/reload-sources` | No body. Re-runs DB/download-dir detection and swaps in a fresh provider; backs the “重新探测” action |
 | POST | `/api/build-library` | `{library_root, tracks}` → `{job_id}` (starts background job) |
 | GET | `/api/build-progress?job_id=` | Live snapshot: `status/done/total/current/results/*_count/manifest_path` |
 | POST | `/api/build-cancel` | `{job_id}` → graceful stop after the current track |
 | POST | `/api/fat-sort` · `/api/dot-clean` | Real TF-card maintenance, returns counts |
 | GET | `/api/pick-folder` | Native macOS folder dialog |
+| OPTIONS | any `/api/*` | CORS preflight → `204` |
+| GET | any non-`/api/` path | Static SPA assets from `dist/`; unknown paths fall back to `index.html`, and `..` escape attempts are pinned back inside `dist/` |
 
 Job lifecycle: `running → done | cancelled | error`. Jobs are kept in memory (last 20). `POST /api/build-library` returns immediately; the frontend polls every 500 ms.
 
@@ -164,7 +189,7 @@ Stop both servers when finished. `npm run build` runs `tsc -b && vite build` (st
 
 ### B. Tests
 ```bash
-python3 -m unittest discover -s engine/tests -v      # 17 tests
+python3 -m unittest discover -s engine/tests -v      # 21 tests
 ```
 Media fixtures are generated with `ffmpeg`; tests skip automatically when ffmpeg is absent.
 
